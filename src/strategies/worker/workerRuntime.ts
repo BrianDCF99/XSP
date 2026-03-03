@@ -20,6 +20,7 @@ export function resolveWorkerExecArgv(baseImportMetaUrl: string, strategyModuleP
   const strategyIsTs = strategyModulePath.endsWith(".ts");
   if (!runningTs && !strategyIsTs) return [];
 
-  // Node >=20: prefer --import tsx. Older runtimes use --loader tsx.
-  return nodeMajorVersion() >= 20 ? ["--import", "tsx"] : ["--loader", "tsx"];
+  // Node 20 workers do not consistently honor --import hooks for .ts entrypoints.
+  // Use --loader tsx for Node <=20 and --import tsx for newer runtimes.
+  return nodeMajorVersion() >= 21 ? ["--import", "tsx"] : ["--loader", "tsx"];
 }
