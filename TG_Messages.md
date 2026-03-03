@@ -10,12 +10,14 @@ Leverage: #x
 Margin: $ (could be min($, cash * 1%) kinda thing so the whole thing included)
 
 Entry:
-    Cond1: ___
-    Cond2: ___
+    Sell Ratio <= 0.2
+    Volume >= 1,000,000
+    Live trades < 15
 
 Exit:
-    Cond1: ___
-    Cond2: ___
+    Take Profit: +20% leveraged
+    Sell Ratio Delta from entry: 0.1
+    Replacement
 
 
 ## /strategyName Command

@@ -207,14 +207,14 @@ export function buildInfoCommandMessage(input) {
     "Margin: min($500, cash * 1%)",
     "",
     "Entry:",
-    "    Cond1: Sell Ratio &lt;= 0.2",
-    "    Cond2: Volume >= 1,000,000",
-    "    Cond3: Live trades &lt; 15",
+    "    Sell Ratio &lt;= 0.2",
+    "    Volume >= 1,000,000",
+    "    Live trades &lt; 15",
     "",
     "Exit:",
-    "    Cond1: Take Profit: +20% leveraged (4% unleveraged from realized costs)",
-    "    Cond2: Sell Ratio Delta from entry: 0.1",
-    "    Cond3: Replacement"
+    "    Take Profit: +20% leveraged",
+    "    Sell Ratio Delta from entry: 0.1",
+    "    Replacement"
   ].join("\n");
 }
 

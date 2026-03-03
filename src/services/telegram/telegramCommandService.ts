@@ -272,7 +272,19 @@ export class TelegramCommandService {
 
   private async handleRefreshCommand(): Promise<void> {
     if (!this.cfg.manualExecution.enabled) return;
+
+    this.logger.info("manual refresh command received", {
+      exchange: this.collector.exchangeName
+    });
+
     const summary = await this.manualActionProcessor.runGlobalRefresh("manual");
+
+    this.logger.info("manual refresh command completed", {
+      exchange: this.collector.exchangeName,
+      strategiesUpdated: summary.strategiesUpdated,
+      messagesPublished: summary.messageCount,
+      eventsPersisted: summary.eventCount
+    });
 
     const text = [
       `Refresh complete (${this.collector.exchangeName.toUpperCase()})`,
