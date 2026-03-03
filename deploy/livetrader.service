@@ -1,0 +1,25 @@
+[Unit]
+Description=LiveTrader Futures Runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=CHANGE_ME
+WorkingDirectory=/opt/LiveTrader
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+# Optional:
+# EnvironmentFile=/opt/LiveTrader/.env
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/LiveTrader/data
+
+[Install]
+WantedBy=multi-user.target

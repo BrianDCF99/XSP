@@ -1,0 +1,6 @@
+-- Apply order:
+-- 1) sql/001_schema.sql
+-- 2) sql/002_views_and_functions.sql
+--
+-- Supabase SQL editor does not support psql include directives.
+-- Paste and run each file in the order above.
