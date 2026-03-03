@@ -97,9 +97,9 @@ M: $marginInUse | N: $openNotional
 🟢 Entry Available:
 
 TICKER: $priceAtAlert | M: $MarginToput
-    - Cond1:
-    - Cond2:
-    - etc..
+    - Sell Ratio <= 0.2 (now: x.xxxx)
+    - Volume >= 1,000,000 (now: x,xxx,xxx)
+    - Live trades < 15 (now: #)
 
 *** Opened | Refresh *** Buttons
 
@@ -114,9 +114,8 @@ Loser: TICKER
 
 New:
 TICKER: $priceAtAlert | M: $MarginToPut
-    - Cond1:
-    - Cond2:
-    - etc..
+    - Sell Ratio <= 0.2 (now: x.xxxx)
+    - Volume >= 1,000,000 (now: x,xxx,xxx)
 
 *** Opened | Refresh *** Buttons
 
