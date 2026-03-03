@@ -2,10 +2,15 @@
  * Runs one archive collection job in a dedicated worker thread.
  */
 import { Worker } from "node:worker_threads";
+import { runArchiveCollector } from "../runtime/archiveCollectorRuntime.js";
 import { CollectorRunSummary, CollectorWorkerInput, CollectorWorkerResult } from "../types.js";
 import { resolveCollectorWorkerExecArgv, resolveCollectorWorkerFileUrl } from "./collectorWorkerRuntime.js";
 
 export async function runCollectorWorker(input: CollectorWorkerInput, timeoutMs: number): Promise<CollectorRunSummary> {
+  if (import.meta.url.endsWith(".ts")) {
+    return runWithTimeout(runArchiveCollector(input), timeoutMs, "Collector");
+  }
+
   return new Promise<CollectorRunSummary>((resolve, reject) => {
     let settled = false;
 
@@ -48,5 +53,23 @@ export async function runCollectorWorker(input: CollectorWorkerInput, timeoutMs:
       settled = true;
       reject(new Error(`Collector worker exited with code ${code}`));
     });
+  });
+}
+
+function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`${label} worker timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
   });
 }
