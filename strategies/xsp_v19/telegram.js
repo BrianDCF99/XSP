@@ -73,9 +73,9 @@ export function buildEntryAvailableTelegramMessage(input) {
     "🟢 Entry Available:",
     "",
     `${ticker}: ${fmtPrice(input.priceAtAlert)} | M: ${fmtRoundedUsd(Number(input.marginToPut ?? 0))}`,
-    `    - Sell Ratio <= ${input.sellRatioMax} (now: ${Number(input.sellRatioNow ?? 0).toFixed(4)})`,
+    `    - Sell Ratio &lt;= ${input.sellRatioMax} (now: ${Number(input.sellRatioNow ?? 0).toFixed(4)})`,
     `    - Volume >= ${Number(input.minHourVolume ?? 0).toLocaleString()} (now: ${Number(input.hourVolumeNow ?? 0).toLocaleString()})`,
-    `    - Live trades < ${input.concurrentCap} (now: ${input.currentOpenTrades})`
+    `    - Live trades &lt; ${input.concurrentCap} (now: ${input.currentOpenTrades})`
   ].join("\n");
 }
 
@@ -104,7 +104,7 @@ export function buildReplacementAvailableTelegramMessage(input) {
     "",
     "New:",
     `${newTicker}: ${fmtPrice(input.newPriceAtAlert)} | M: ${fmtRoundedUsd(Number(input.marginToPut ?? 0))}`,
-    `    - Sell Ratio <= ${input.sellRatioMax} (now: ${Number(input.newSellRatioNow ?? 0).toFixed(4)})`,
+    `    - Sell Ratio &lt;= ${input.sellRatioMax} (now: ${Number(input.newSellRatioNow ?? 0).toFixed(4)})`,
     `    - Volume >= ${Number(input.minHourVolume ?? 0).toLocaleString()} (now: ${Number(input.newHourVolumeNow ?? 0).toLocaleString()})`
   ].join("\n");
 }
@@ -207,9 +207,9 @@ export function buildInfoCommandMessage(input) {
     "Margin: min($500, cash * 1%)",
     "",
     "Entry:",
-    "    Cond1: Sell Ratio <= 0.2",
+    "    Cond1: Sell Ratio &lt;= 0.2",
     "    Cond2: Volume >= 1,000,000",
-    "    Cond3: Live trades < 15",
+    "    Cond3: Live trades &lt; 15",
     "",
     "Exit:",
     "    Cond1: Take Profit: +20% leveraged (4% unleveraged from realized costs)",

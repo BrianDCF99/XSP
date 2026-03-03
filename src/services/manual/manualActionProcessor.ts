@@ -141,7 +141,11 @@ export class ManualActionProcessor {
     await this.runGlobalRefresh("auto");
   }
 
-  async runGlobalRefresh(trigger: "manual" | "auto"): Promise<void> {
+  async runGlobalRefresh(trigger: "manual" | "auto"): Promise<{
+    strategiesUpdated: number;
+    messageCount: number;
+    eventCount: number;
+  }> {
     const updates: Array<{ strategyName: string; messages: StrategyMessage[]; events: PositionEvent[] }> = [];
 
     for (const strategy of this.strategies) {
@@ -165,6 +169,15 @@ export class ManualActionProcessor {
         `${this.collector.exchangeName}:refresh:${trigger}`
       );
     }
+
+    const messageCount = updates.reduce((sum, update) => sum + update.messages.length, 0);
+    const eventCount = updates.reduce((sum, update) => sum + update.events.length, 0);
+
+    return {
+      strategiesUpdated: updates.length,
+      messageCount,
+      eventCount
+    };
   }
 
   private async loadModules(): Promise<void> {
