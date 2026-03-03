@@ -28,18 +28,20 @@ export class TelegramClient {
   async sendMessage(text: string, replyMarkup?: TelegramReplyMarkup): Promise<number | null> {
     if (!this.isEnabled()) return null;
 
+    const url = buildSendMessageUrl(this.cfg);
     try {
-      const res = await this.postMessage(text, replyMarkup);
-      const data = (await res.json()) as TelegramApiResponse;
+      const res = await this.postMessage(url, text, replyMarkup);
+      const data = await this.parseJson<TelegramApiResponse>(res, "sendMessage");
+      if (!data) return null;
 
       if (!isTelegramSendSuccess(res.ok, data)) {
-        this.logFailure(res.status, data.description ?? "unknown");
+        this.logFailure("sendMessage", res.status, data.description ?? "unknown");
         return null;
       }
 
       return extractTelegramMessageId(data);
     } catch (error) {
-      this.logRequestError(error);
+      this.logRequestError("sendMessage", url, error);
       return null;
     }
   }
@@ -47,18 +49,20 @@ export class TelegramClient {
   async getUpdates(offset?: number): Promise<TelegramUpdate[]> {
     if (!this.isEnabled()) return [];
 
+    const url = buildGetUpdatesUrl(this.cfg);
     try {
-      const res = await this.postGetUpdates(offset);
-      const data = (await res.json()) as TelegramUpdatesApiResponse;
+      const res = await this.postGetUpdates(url, offset);
+      const data = await this.parseJson<TelegramUpdatesApiResponse>(res, "getUpdates");
+      if (!data) return [];
 
       if (!isTelegramUpdatesSuccess(res.ok, data)) {
-        this.logFailure(res.status, data.description ?? "unknown");
+        this.logFailure("getUpdates", res.status, data.description ?? "unknown");
         return [];
       }
 
       return data.result ?? [];
     } catch (error) {
-      this.logRequestError(error);
+      this.logRequestError("getUpdates", url, error);
       return [];
     }
   }
@@ -66,10 +70,9 @@ export class TelegramClient {
   async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
     if (!this.isEnabled()) return;
 
+    const url = buildAnswerCallbackQueryUrl(this.cfg);
+    const body = buildAnswerCallbackBody(callbackQueryId, text);
     try {
-      const url = buildAnswerCallbackQueryUrl(this.cfg);
-      const body = buildAnswerCallbackBody(callbackQueryId, text);
-
       await fetch(url, {
         method: "POST",
         headers: {
@@ -78,12 +81,11 @@ export class TelegramClient {
         body: JSON.stringify(body)
       });
     } catch (error) {
-      this.logRequestError(error);
+      this.logRequestError("answerCallbackQuery", url, error);
     }
   }
 
-  private async postMessage(text: string, replyMarkup?: TelegramReplyMarkup): Promise<Response> {
-    const url = buildSendMessageUrl(this.cfg);
+  private async postMessage(url: string, text: string, replyMarkup?: TelegramReplyMarkup): Promise<Response> {
     const body = buildSendMessageBody(this.cfg, text, replyMarkup);
 
     return fetch(url, {
@@ -95,8 +97,7 @@ export class TelegramClient {
     });
   }
 
-  private async postGetUpdates(offset?: number): Promise<Response> {
-    const url = buildGetUpdatesUrl(this.cfg);
+  private async postGetUpdates(url: string, offset?: number): Promise<Response> {
     const body = buildGetUpdatesBody(offset);
 
     return fetch(url, {
@@ -108,16 +109,46 @@ export class TelegramClient {
     });
   }
 
-  private logFailure(status: number, description: string): void {
+  private async parseJson<T>(res: Response, operation: string): Promise<T | null> {
+    let raw = "";
+    try {
+      raw = await res.text();
+      if (raw.length === 0) {
+        this.logger.error("telegram response parse failed", {
+          operation,
+          status: res.status,
+          error: "empty response body"
+        });
+        return null;
+      }
+
+      return JSON.parse(raw) as T;
+    } catch (error) {
+      this.logger.error("telegram response parse failed", {
+        operation,
+        status: res.status,
+        error: error instanceof Error ? error.message : String(error),
+        bodyPreview: raw.slice(0, 240)
+      });
+      return null;
+    }
+  }
+
+  private logFailure(operation: string, status: number, description: string): void {
     this.logger.warn("telegram send failed", {
+      operation,
       status,
       description
     });
   }
 
-  private logRequestError(error: unknown): void {
+  private logRequestError(operation: string, url: string, error: unknown): void {
+    const cause = error instanceof Error && "cause" in error ? String((error as Error & { cause?: unknown }).cause ?? "") : "";
     this.logger.error("telegram request failed", {
-      error: error instanceof Error ? error.message : String(error)
+      operation,
+      url,
+      error: error instanceof Error ? error.message : String(error),
+      ...(cause.length > 0 ? { cause } : {})
     });
   }
 }

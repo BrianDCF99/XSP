@@ -196,16 +196,29 @@ export class TelegramCommandService {
   private async pollOnce(): Promise<void> {
     try {
       await this.runManualMaintenance();
+    } catch (error) {
+      this.logger.error("telegram manual maintenance failed", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
 
+    try {
       const updates = await this.telegram.getUpdates(this.updateOffset);
       if (updates.length === 0) return;
 
       for (const update of updates) {
         this.updateOffset = Math.max(this.updateOffset ?? 0, update.update_id + 1);
-        await this.handleUpdate(update);
+        try {
+          await this.handleUpdate(update);
+        } catch (error) {
+          this.logger.error("telegram command update failed", {
+            updateId: update.update_id,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
     } catch (error) {
-      this.logger.error("telegram command poll failed", {
+      this.logger.error("telegram command polling failed", {
         error: error instanceof Error ? error.message : String(error)
       });
     }
@@ -228,13 +241,30 @@ export class TelegramCommandService {
     const message = update.message;
     if (!message?.text) return;
 
-    if (String(message.chat.id) !== this.cfg.env.telegramChatId) {
+    const messageChatId = String(message.chat.id);
+    if (messageChatId !== this.cfg.env.telegramChatId) {
+      if (message.text.trim().startsWith("/")) {
+        this.logger.warn("telegram command ignored", {
+          reason: "chat_mismatch",
+          command: message.text,
+          expectedChatId: this.cfg.env.telegramChatId,
+          receivedChatId: messageChatId
+        });
+      }
       return;
     }
 
     const strategyNames = this.strategies.map((s) => s.name);
     const parsed = parseCommand(message.text, strategyNames);
-    if (!parsed) return;
+    if (!parsed) {
+      if (message.text.trim().startsWith("/")) {
+        this.logger.warn("telegram command ignored", {
+          reason: "unrecognized_command_or_strategy",
+          command: message.text
+        });
+      }
+      return;
+    }
 
     if (parsed.kind === "REFRESH") {
       await this.handleRefreshCommand();
@@ -271,13 +301,39 @@ export class TelegramCommandService {
   }
 
   private async handleRefreshCommand(): Promise<void> {
-    if (!this.cfg.manualExecution.enabled) return;
+    if (!this.cfg.manualExecution.enabled) {
+      const text = `Refresh unavailable (${this.collector.exchangeName.toUpperCase()})\nmanualExecution.enabled is false`;
+      await this.telegram.sendMessage(text);
+      return;
+    }
 
     this.logger.info("manual refresh command received", {
       exchange: this.collector.exchangeName
     });
 
-    const summary = await this.manualActionProcessor.runGlobalRefresh("manual");
+    let summary: {
+      strategiesUpdated: number;
+      messageCount: number;
+      eventCount: number;
+    };
+    try {
+      summary = await this.manualActionProcessor.runGlobalRefresh("manual");
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error);
+      this.logger.error("manual refresh command failed", {
+        exchange: this.collector.exchangeName,
+        error: errorText
+      });
+
+      const text = [`Refresh failed (${this.collector.exchangeName.toUpperCase()})`, `Error: ${errorText}`].join("\n");
+      const failedMessageId = await this.telegram.sendMessage(text);
+      if (failedMessageId === null) {
+        this.logger.error("manual refresh failure message not delivered", {
+          exchange: this.collector.exchangeName
+        });
+      }
+      return;
+    }
 
     this.logger.info("manual refresh command completed", {
       exchange: this.collector.exchangeName,
@@ -293,7 +349,12 @@ export class TelegramCommandService {
       `Events persisted: ${summary.eventCount}`
     ].join("\n");
 
-    await this.telegram.sendMessage(text);
+    const messageId = await this.telegram.sendMessage(text);
+    if (messageId === null) {
+      this.logger.error("manual refresh summary not delivered", {
+        exchange: this.collector.exchangeName
+      });
+    }
   }
 
   private async handleInfoCommand(strategyName: string): Promise<void> {

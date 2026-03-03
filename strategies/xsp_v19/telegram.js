@@ -105,7 +105,8 @@ export function buildReplacementAvailableTelegramMessage(input) {
     "New:",
     `${newTicker}: ${fmtPrice(input.newPriceAtAlert)} | M: ${fmtRoundedUsd(Number(input.marginToPut ?? 0))}`,
     `    - Sell Ratio &lt;= ${input.sellRatioMax} (now: ${Number(input.newSellRatioNow ?? 0).toFixed(4)})`,
-    `    - Volume >= ${Number(input.minHourVolume ?? 0).toLocaleString()} (now: ${Number(input.newHourVolumeNow ?? 0).toLocaleString()})`
+    `    - Volume >= ${Number(input.minHourVolume ?? 0).toLocaleString()} (now: ${Number(input.newHourVolumeNow ?? 0).toLocaleString()})`,
+    `    - Replacement threshold: ${Number(input.replacementThresholdPct ?? 0).toFixed(2)}% (loser now: ${Number(input.loserPnlPct ?? 0).toFixed(2)}%)`
   ].join("\n");
 }
 
@@ -213,8 +214,8 @@ export function buildInfoCommandMessage(input) {
     "",
     "Exit:",
     "    Take Profit: +20% leveraged",
-    "    Sell Ratio Delta from entry: 0.1",
-    "    Replacement"
+    "    ΔSR: 0.1",
+    "    Replacement Threshold: -5%"
   ].join("\n");
 }
 

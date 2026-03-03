@@ -16,8 +16,8 @@ Entry:
 
 Exit:
     Take Profit: +20% leveraged
-    Sell Ratio Delta from entry: 0.1
-    Replacement
+    ΔSR: 0.1
+    Replacement Threshold: -5%
 
 
 ## /strategyName Command
@@ -116,6 +116,7 @@ New:
 TICKER: $priceAtAlert | M: $MarginToPut
     - Sell Ratio <= 0.2 (now: x.xxxx)
     - Volume >= 1,000,000 (now: x,xxx,xxx)
+    - Replacement threshold: -5.00% (loser now: currPNL%)
 
 *** Opened | Refresh *** Buttons
 

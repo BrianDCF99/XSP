@@ -423,7 +423,8 @@ function createReplacementMessage(input, signal, loser, marketBySymbol) {
       sellRatioMax: SELL_RATIO_MAX,
       minHourVolume: MIN_HOUR_VOLUME,
       newSellRatioNow: signal.sellRatio,
-      newHourVolumeNow: signal.hourVolume
+      newHourVolumeNow: signal.hourVolume,
+      replacementThresholdPct: REPLACEMENT_THRESHOLD_PCT
     }),
     manualAlert: {
       kind: "REPLACEMENT_AVAILABLE",
