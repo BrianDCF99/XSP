@@ -194,12 +194,32 @@ export function accountFromMexc(openPositions: MexcOpenPosition[], assets: MexcA
     throw new Error("MEXC live account payload missing required USDT equity/cash/margin/unrealized fields");
   }
 
-  const notionalFromPositions = openPositions.reduce((sum, p) => {
-    const value = finiteNumber(p.positionValue);
-    if (value === null) {
-      throw new Error(`MEXC live position payload missing positionValue for ${p.symbol}`);
+  // Some MEXC rows omit positionValue on newly-opened or low-liquidity contracts.
+  // Keep runtime resilient by estimating notional from other numeric fields.
+  const positionNotionalUsd = (p: MexcOpenPosition): number => {
+    const direct = positiveFiniteNumber(p.positionValue);
+    if (direct !== null) return direct;
+
+    const leverage = positiveFiniteNumber(p.leverage);
+    const marginLike =
+      positiveFiniteNumber(p.im) ??
+      positiveFiniteNumber(p.oim) ??
+      positiveFiniteNumber(p.positionMargin);
+    if (leverage !== null && marginLike !== null) {
+      return marginLike * leverage;
     }
-    return sum + value;
+
+    const qty = positiveFiniteNumber(p.holdVol);
+    const entry = positiveFiniteNumber(p.openAvgPrice);
+    if (qty !== null && entry !== null) {
+      return qty * entry;
+    }
+
+    return 0;
+  };
+
+  const notionalFromPositions = openPositions.reduce((sum, p) => {
+    return sum + positionNotionalUsd(p);
   }, 0);
 
   return {

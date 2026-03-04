@@ -56,6 +56,11 @@ export interface MexcAsset {
   unrealized?: number | undefined;
 }
 
+interface CachedContractSize {
+  contractSize: number;
+  expiresAt: number;
+}
+
 function normalizeNumber(value: unknown): number | undefined {
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
@@ -169,6 +174,8 @@ function normalizeAsset(row: unknown): MexcAsset | null {
 export class MexcPrivateClient {
   private readonly baseUrl: string;
   private readonly recvWindowMs: number;
+  private readonly contractSizeCache = new Map<string, CachedContractSize>();
+  private readonly contractSizeTtlMs = 6 * 60 * 60 * 1000;
 
   constructor(private readonly cfg: RuntimeConfig) {
     const execution = cfg.exchange.execution;
@@ -186,9 +193,12 @@ export class MexcPrivateClient {
       symbol
     });
 
-    return rows
+    const positions = rows
       .map((row) => normalizeOpenPosition(row))
       .filter((row): row is MexcOpenPosition => row !== null);
+
+    await this.hydrateMissingPositionValues(positions);
+    return positions;
   }
 
   async getHistoryPositions(input: {
@@ -217,6 +227,109 @@ export class MexcPrivateClient {
     return rows
       .map((row) => normalizeAsset(row))
       .filter((row): row is MexcAsset => row !== null);
+  }
+
+  private async hydrateMissingPositionValues(positions: MexcOpenPosition[]): Promise<void> {
+    const needsNotional = positions.filter((position) => {
+      if (Number.isFinite(position.positionValue) && Number(position.positionValue) > 0) return false;
+      if (!Number.isFinite(position.holdVol) || Number(position.holdVol) <= 0) return false;
+      if (!Number.isFinite(position.openAvgPrice) || Number(position.openAvgPrice) <= 0) return false;
+      return true;
+    });
+
+    if (needsNotional.length === 0) return;
+
+    const symbols = [...new Set(needsNotional.map((position) => position.symbol.trim().toUpperCase()))];
+    const contractSizeBySymbol = await this.resolveContractSizes(symbols);
+
+    for (const position of needsNotional) {
+      const symbol = position.symbol.trim().toUpperCase();
+      const holdVol = Number(position.holdVol);
+      const openAvgPrice = Number(position.openAvgPrice);
+
+      const contractSize = contractSizeBySymbol.get(symbol);
+      if (contractSize !== undefined && contractSize > 0) {
+        position.positionValue = holdVol * openAvgPrice * contractSize;
+        continue;
+      }
+
+      // Final fallback when contract metadata is temporarily unavailable.
+      const marginLike = normalizeNumber(position.im) ?? normalizeNumber(position.oim) ?? normalizeNumber(position.positionMargin);
+      const leverage = normalizeNumber(position.leverage);
+      if (marginLike !== undefined && marginLike > 0 && leverage !== undefined && leverage > 0) {
+        position.positionValue = marginLike * leverage;
+      }
+    }
+  }
+
+  private async resolveContractSizes(symbols: string[]): Promise<Map<string, number>> {
+    const now = Date.now();
+    const result = new Map<string, number>();
+    const missing: string[] = [];
+
+    for (const rawSymbol of symbols) {
+      const symbol = rawSymbol.trim().toUpperCase();
+      const cached = this.contractSizeCache.get(symbol);
+      if (cached && cached.expiresAt > now) {
+        result.set(symbol, cached.contractSize);
+        continue;
+      }
+      missing.push(symbol);
+    }
+
+    if (missing.length === 0) {
+      return result;
+    }
+
+    await Promise.all(
+      missing.map(async (symbol) => {
+        const size = await this.fetchContractSize(symbol);
+        if (size !== undefined && size > 0) {
+          this.contractSizeCache.set(symbol, {
+            contractSize: size,
+            expiresAt: now + this.contractSizeTtlMs
+          });
+          result.set(symbol, size);
+        }
+      })
+    );
+
+    return result;
+  }
+
+  private async fetchContractSize(symbol: string): Promise<number | undefined> {
+    const query = toQueryString({ symbol });
+    const url = query ? `${this.baseUrl}/api/v1/contract/detail?${query}` : `${this.baseUrl}/api/v1/contract/detail`;
+
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+
+      const bodyText = await response.text();
+      const json = JSON.parse(bodyText);
+      const envelope = parseEnvelope<unknown>(json);
+      if (!response.ok || !envelope.success || envelope.code !== 0) {
+        return undefined;
+      }
+
+      if (!envelope.data || typeof envelope.data !== "object" || Array.isArray(envelope.data)) {
+        return undefined;
+      }
+
+      const data = envelope.data as Record<string, unknown>;
+      const contractSize = normalizeNumber(data.contractSize ?? data.contract_size ?? data.multiplier ?? data.multiple);
+      if (contractSize === undefined || contractSize <= 0) {
+        return undefined;
+      }
+
+      return contractSize;
+    } catch {
+      return undefined;
+    }
   }
 
   private async signedGet<T>(path: string, params: Record<string, string | number | undefined>): Promise<T> {
