@@ -282,7 +282,8 @@ export class ManualAlertActionResolver {
           newMexcPriceAtAlert,
           marginToPut,
           newSellRatioNow,
-          newHourVolumeNow
+          newHourVolumeNow,
+          currentOpenTrades: openPositions.length
         }),
         manualAlert: {
           kind: "REPLACEMENT_AVAILABLE",
@@ -357,11 +358,31 @@ export class ManualAlertActionResolver {
         exchange: this.deps.collector.exchangeName.toUpperCase(),
         strategyLabel: resolveStrategyLabel(alert.strategyName, module),
         tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
-        symbol: result.waitingSymbol ?? alert.primarySymbol
+        symbol: result.waitingSymbol ?? alert.primarySymbol,
+        symbols: await this.collectWaitingSymbols(alert.strategyName, result.waitingSymbol ?? alert.primarySymbol)
       })
     };
 
     await this.deps.publish(alert.strategyName, [waitingMessage], [], `${this.deps.collector.exchangeName}:manual_waiting`);
+  }
+
+  private async collectWaitingSymbols(strategyName: string, fallbackSymbol: string): Promise<string[]> {
+    const waiting = await this.deps.repos.manualAlerts.listWaiting(200);
+    const symbols = waiting
+      .filter((alert) => alert.strategyName === strategyName)
+      .map((alert) => normalizeSymbol(alert.primarySymbol))
+      .filter((symbol) => symbol.length > 0);
+
+    if (symbols.length === 0) {
+      return [fallbackSymbol];
+    }
+
+    const unique = [...new Set(symbols)];
+    if (!unique.includes(fallbackSymbol)) {
+      unique.push(fallbackSymbol);
+    }
+
+    return unique;
   }
 
   private async resolveTrackDecisionAlert(alert: ManualAlertRecord, module: StrategyTelegramModule): Promise<AlertActionResult> {

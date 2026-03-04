@@ -7,6 +7,7 @@ import { OpenPositionRecord } from "../../db/repos/tradeRepository.js";
 import { ExchangeAccountState } from "../../exchange/accountStateExtractor.js";
 import { ExchangeCollector } from "../../exchange/exchangeCollector.js";
 import { MexcOpenPosition, MexcPrivateClient } from "../../exchange/mexc/mexcPrivateClient.js";
+import { BybitSignalRow, extractBybitSignalRows } from "../../exchange/signalMarketExtractor.js";
 import { PositionEvent, StrategyMessage } from "../../strategies/types.js";
 import {
   AccountState,
@@ -48,6 +49,8 @@ interface TrackDecisionState {
   message: StrategyMessage | null;
 }
 
+type SignalRowByMexcSymbol = Map<string, BybitSignalRow>;
+
 export class ManualRefreshReconciler {
   constructor(private readonly deps: ManualRefreshReconcilerDeps) {}
 
@@ -67,6 +70,7 @@ export class ManualRefreshReconciler {
     const mexcOpenMap = new Map(mexcOpen.map((position) => [normalizeSymbol(position.symbol), position]));
 
     const account = await this.currentAccountState();
+    let signalByMexcSymbol: SignalRowByMexcSymbol | null = null;
 
     for (const position of dbOpen) {
       const symbol = normalizeSymbol(position.symbol);
@@ -94,7 +98,18 @@ export class ManualRefreshReconciler {
       if (dbOpenMap.has(symbol)) continue;
 
       if (!tracked.has(symbol)) {
-        const decision = await this.resolveUntrackedSymbolDecision(strategyName, symbol, mexcPosition, module);
+        if (signalByMexcSymbol === null) {
+          signalByMexcSymbol = await this.loadSignalRowsByMexcSymbol();
+        }
+
+        const decision = await this.resolveUntrackedSymbolDecision(
+          strategyName,
+          symbol,
+          mexcPosition,
+          module,
+          signalByMexcSymbol.get(symbol) ?? null,
+          dbOpen.length
+        );
         if (decision.message) {
           messages.push(decision.message);
         }
@@ -453,7 +468,9 @@ export class ManualRefreshReconciler {
     strategyName: string,
     symbol: string,
     mexcPosition: MexcOpenPosition,
-    module: StrategyTelegramModule
+    module: StrategyTelegramModule,
+    signal: BybitSignalRow | null,
+    currentOpenTrades: number
   ): Promise<TrackDecisionState> {
     const latest = await this.deps.repos.manualAlerts.getLatestByKindAndSymbol(strategyName, "ENTRY_TRACK_DECISION", symbol);
     if (latest) {
@@ -497,7 +514,13 @@ export class ManualRefreshReconciler {
           symbol,
           entryPrice,
           takeProfitPrice,
-          liquidationPrice
+          liquidationPrice,
+          sellRatioMax: 0.2,
+          minHourVolume: 1_000_000,
+          concurrentCap: 15,
+          sellRatioNow: signal?.sellRatio,
+          hourVolumeNow: signal?.hourVolume,
+          currentOpenTrades
         })
       : `${symbol} detected on exchange but not tracked. Track it in strategy?`;
 
@@ -521,13 +544,26 @@ export class ManualRefreshReconciler {
           entryFeeBps,
           entrySlippageBps,
           takeProfitPrice,
-          liquidationPrice
+          liquidationPrice,
+          sellRatioNow: signal?.sellRatio ?? null,
+          hourVolumeNow: signal?.hourVolume ?? null,
+          currentOpenTrades
         },
         buttons: ["TRACK", "IGNORE"]
       }
     };
 
     return { allowEntry: false, message };
+  }
+
+  private async loadSignalRowsByMexcSymbol(): Promise<SignalRowByMexcSymbol> {
+    try {
+      const snapshot = await this.deps.collector.collectFuturesData();
+      const summary = extractBybitSignalRows(snapshot);
+      return new Map(summary.rows.map((row) => [normalizeSymbol(row.mexcSymbol), row]));
+    } catch {
+      return new Map();
+    }
   }
 
   private async currentAccountState(): Promise<AccountState> {

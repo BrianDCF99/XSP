@@ -4,7 +4,7 @@
 - if multiple coins have a funding event it should be a single message with all the coins
 
 ## /info strategyName Command
-🐦‍🔥 StrategyName V#
+🐦‍🔥 StrategyName V#                                                
 
 Leverage: #x
 Margin: $ (could be min($, cash * 1%) kinda thing so the whole thing included)
@@ -21,31 +21,38 @@ Exit:
 
 
 ## /strategyName Command
-🐦‍🔥 StrategyName V#
+🐦‍🔥 StrategyName V#                                                
 📈 Open Positions
 
-1. TICKER - Bybit: E: $priceatEntrty | C: $currPrice
-      E: $priceAtEntry | PNL: currPNL% / $currPNL | DD - HH:MM (time since Entry)
+1. TICKER              DD - HH:MM (time since Entry)
+      Bybit: E: $priceatEntrty | C: $currPrice
+
+      E: $priceAtEntry | PNL: currPNL% | PNL: $currPNL
       C: $currPrice | TP: $takeProfit | L: $liquidation
 
-2. TICKER - Bybit: E: $priceatEntrty | C: $currPrice
-      E: $priceAtEntry | PNL: currPNL% / $currPNL  | DD - HH:MM (time since Entry)
+2. TICKER              DD - HH:MM (time since Entry)
+      Bybit: E: $priceatEntrty | C: $currPrice
+
+      E: $priceAtEntry | PNL: currPNL% | PNL: $currPNL
       C: $currPrice | TP: $takeProfit | L: $liquidation
 
-3. TICKER - Bybit: E: $priceatEntrty | C: $currPrice
-      E: $priceAtEntry | PNL: currPNL% / $currPNL  | DD - HH:MM (time since Entry)
+3. TICKER              DD - HH:MM (time since Entry)
+      Bybit: E: $priceatEntrty | C: $currPrice
+
+      E: $priceAtEntry | PNL: currPNL% | PNL: $currPNL
       C: $currPrice | TP: $takeProfit | L: $liquidation
 
 4. ... etc
 
+
 Live Stats: (this line bold)
 
-PNL:  % | $
-Unrealized PNL: $ | %
+PNL:   % | $
+U-PNL: % | $
 
 Entries: #entries | O: #opentrades | M: #missed trades
-Winners: #winners | Losers: #losers  | Win %: %
-Replaced: #replaced| Liq'd: #liquidations
+Winners: #winners | Losers: #losers  |  (win%)%
+Replaced: #replaced | Liq'd: #liquidations
 
 Eq: $currentEquity | Cash: $(currEq-marginInUse)
 M: $marginInUse | N: $openNotional
@@ -54,112 +61,128 @@ Net Funding: $
 
 
 ## Funding Update
-🐦‍🔥 StrategyName V#
+🐦‍🔥 StrategyName V#                                                
 💸 Fudnding Update:
 
-1. TICKER: $funding | Net: $netFunding (+ or -, NET as in accumulation for all the funding updates while the trade was open)
+1. TICKER | $funding | Net: $netFunding (+ or -, NET as in accumulation for all the funding updates while the trade was open)
 
-2. TICKER: $funding | Net: $netFunding
+2. TICKER | $funding | Net: $netFunding
 
-Account Update:
+
+Account Update: (this line bold)
+
 Eq: $currentEquity | Cash: $(currEq-marginInUse)
 M: $marginInUse | N: $openNotional
 
 
 ## Exit Available
-🐦‍🔥 StrategyName V#
-✅(❌ - for loss)EXIT: Reason (Each strat has own exit reasons)
+🐦‍🔥 StrategyName V#                                                
+✅(❌ - for loss)EXIT ALERT: Reason (Each strat has own exit reasons)
 
-TICKER - Bybit: E: $priceatEntrty | C: $currPrice
-    E: $priceAtEntry | PNL: currPNL% / $currPNL  | DD - HH:MM (time since Entry)
+TICKER              DD - HH:MM (time since Entry)
+    Bybit: E: $priceatEntrty | C: $currPrice
+
+    E: $priceAtEntry | PNL: currPNL% | PNL: $currPNL
     C: $currPrice | TP: $takeProfit | L: $liquidation
 
 *** Closed | Refresh *** Buttons
 
 
 ## Exit Confirmed
-🐦‍🔥 StrategyName V#
-✅(❌ - for loss)EXIT: Reason (Each strat has own exit reasons)
+🐦‍🔥 StrategyName V#                                                
+✅(❌ - for loss)CLOSED: Reason (Each strat has own exit reasons)
 
-TICKER:
+TICKER
 PNL: $ | % (Realized pnl including the entry and exit fees slippages and stuff)
-Exit Slippage: x.xx bps
-Roundtrip Slippage: x.xx bps
+
+Exit(Slippage): x.xx bps | RT(Round trip slippage): x.xx bps
 Funding: $ (could be - to indicate net negative)
 
-Account Update:
+
+Account Update: (this line bold)
+
 Eq: $currentEquity | Cash: $(currEq-marginInUse)
 M: $marginInUse | N: $openNotional
 
 
 ## Entry Available
-🐦‍🔥 StrategyName V#
+🐦‍🔥 StrategyName V#                                                
 🟢 Entry Available:
 
-TICKER:
-Bybit: E: $priceAtAlert
-Mexc:  E: $priceAtAlert
+TICKER
+    Bybit:  E: $priceAtAlert
+    Mexc:  E: $priceAtAlert
 
-Margin: $MarginToPut
+    Margin: $MarginToPut
 
-    x.xxxx
-    x,xxx,xxx
-    #
+    SR:           x.xx
+    Vol:          x.xx M
+    Opened: #
 
 *** Opened | Refresh *** Buttons
 
 
 ## Replacement Available
-🐦‍🔥 StrategyName V#
+🐦‍🔥 StrategyName V#                                                
 🚨 Replacement:
 
-Loser: TICKER - Bybit: E: $priceatEntrty | C: $currPrice
-    E: $priceAtEntry | PNL: currPNL% / $currPNL  | DD - HH:MM (time since Entry)
+Close:
+TICKER              DD - HH:MM (time since Entry)
+    Bybit: E: $priceatEntrty | C: $currPrice
+
+    E: $priceAtEntry | PNL: currPNL% / $currPNL
     C: $currPrice | TP: $takeProfit | L: $liquidation
 
-New:
-TICKER:
-Bybit: E: $priceAtAlert
-Mexc:  E: $priceAtAlert
+Open:
+TICKER
+    Bybit:  E: $priceAtAlert
+    Mexc:  E: $priceAtAlert
 
-Margin: $MarginToPut
+    Margin: $MarginToPut
 
-    x.xxxx
-    x,xxx,xxx
-    currPNL%
+    SR:           x.xx
+    Vol:          x.xx M
+    Opened: #
 
 *** Opened | Refresh *** Buttons
 
 
 ## Entry Confirmed
-🐦‍🔥 StrategyName V#
+🐦‍🔥 StrategyName V#                                                
 🍀 Opened Trade:
 
 TICKER
-E: $entryPrice | RE: $realizedPrice
-TP: $takeProfit | L: $liquidation
+    E: $entryPrice | RE: $realizedPrice
+    TP: $takeProfit | L: $liquidation
 
-Entry Slippage: x.xx bps
+    Entry Slippage: x.xx bps
 
-Account Update:
+
+Account Update: (this line bold)
+
 Eq: $currentEquity | Cash: $(currEq-marginInUse)
 M: $marginInUse | N: $openNotional
 
 
 ## Waiting For Confirmation
-🐦‍🔥 StrategyName V#
+🐦‍🔥 StrategyName V#                                                
 ⏳ Waiting for trade confirmation:
 
-TICKER
+1. TICKER
+2. TICKER
+3. TICKER
 
 
 ## External Position Detected
-🐦‍🔥 StrategyName V#
+🐦‍🔥 StrategyName V#                                                
 🧭 External Position Detected:
 
 TICKER
-E: $entryPrice | TP: $takeProfit | L: $liquidation
+    E: $entryPrice | TP: $takeProfit | L: $liquidation
 
+    SR:           x.xx
+    Vol:          x.xx M
+    Opened: #
 *** Track | Do Not Track *** Buttons
 
 

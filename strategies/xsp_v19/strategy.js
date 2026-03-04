@@ -300,7 +300,7 @@ function createEntryAvailableMessage(input, signal, currentOpenTrades) {
   };
 }
 
-function createReplacementMessage(input, signal, loser, signalByMexcSymbol) {
+function createReplacementMessage(input, signal, loser, signalByMexcSymbol, currentOpenTrades) {
   const marginToPut = resolveMarginToPut(input);
   const loserMarket = signalByMexcSymbol.get(loser.symbol);
   const loserCurrentPrice = loserMarket ? loserMarket.mexcPrice : loser.entryPrice;
@@ -371,6 +371,7 @@ function createReplacementMessage(input, signal, loser, signalByMexcSymbol) {
       marginToPut,
       newSellRatioNow: signal.sellRatio,
       newHourVolumeNow: signal.hourVolume,
+      currentOpenTrades,
       replacementThresholdPct: REPLACEMENT_THRESHOLD_PCT
     }),
     manualAlert: {
@@ -447,7 +448,7 @@ export async function entry(input) {
       }
 
       const loser = openPositions[replaceIndex];
-      messages.push(createReplacementMessage(input, signal, loser, signalByMexcSymbol));
+      messages.push(createReplacementMessage(input, signal, loser, signalByMexcSymbol, openPositions.length));
       continue;
     }
 

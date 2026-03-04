@@ -47,7 +47,7 @@ exchange:
     privateApi:
       baseUrl: "https://api.mexc.com"
       recvWindowMs: 10000
-    tickerDeepLinkTemplate: "https://www.mexc.com/futures/{symbol}"
+    tickerDeepLinkTemplate: "https://mexc.onelink.me/KTsj/Ios"
     futuresEndpoints:
       - name: "contract_detail"
         method: "GET"

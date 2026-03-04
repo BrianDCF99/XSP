@@ -58,11 +58,6 @@ interface BootStrategyTelegramModule {
       openNotionalUsd: number;
       netFundingUsd: number;
     };
-    manualExitCandidates?: Array<{
-      tickerDeepLinkTemplate: string;
-      symbol: string;
-      reason: string;
-    }>;
   }) => string;
   buildExitConfirmedTelegramMessage?: (input: {
     emoji: string;
@@ -364,23 +359,34 @@ export class BootRecoveryService {
       }
 
       if (module.buildStrategyStatusTelegramMessage) {
-        const manualCandidates = manualExitCandidates
-          .filter((event) => event.strategyName === strategyName)
-          .map((event) => ({
-            tickerDeepLinkTemplate: this.collector.tickerDeepLinkTemplate,
-            symbol: event.symbol,
-            reason: this.mapBootReason(event.reason ?? "BOOT_RECON")
-          }));
+        const manualCandidates = manualExitCandidates.filter((event) => event.strategyName === strategyName);
 
         const statusText = module.buildStrategyStatusTelegramMessage({
           emoji: this.resolveEmoji(strategyName, module),
           exchange: this.collector.exchangeName.toUpperCase(),
           strategyLabel: this.resolveStrategyLabel(strategyName, module),
           positions: statusPayload.positions,
-          live: statusPayload.live,
-          manualExitCandidates: manualCandidates
+          live: statusPayload.live
         });
         await this.telegram.sendMessage(statusText);
+
+        if (manualCandidates.length > 0) {
+          const lines = manualCandidates.map((event, index) => {
+            const reason = this.mapBootReason(event.reason ?? "BOOT_RECON");
+            const url = this.collector.tickerDeepLinkTemplate.replaceAll("{symbol}", encodeURIComponent(event.symbol));
+            return `${index + 1}. <a href="${url}"><b>${event.symbol}</b></a> | ${reason}`;
+          });
+
+          const offlineNotice = [
+            `<b>${this.resolveEmoji(strategyName, module)} ${this.resolveStrategyLabel(strategyName, module)}</b>`,
+            "Manual Action Required:",
+            "Should Have Been Sold While Bot Was Offline:",
+            "",
+            ...lines
+          ].join("\n");
+
+          await this.telegram.sendMessage(offlineNotice);
+        }
       }
     }
   }
