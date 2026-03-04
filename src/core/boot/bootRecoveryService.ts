@@ -8,6 +8,7 @@ import { OpenPositionRecord } from "../../db/repos/tradeRepository.js";
 import { ExchangeAccountState, extractExchangeAccountState } from "../../exchange/accountStateExtractor.js";
 import { ExchangeCollector } from "../../exchange/exchangeCollector.js";
 import { MexcHistoryPosition, MexcOpenPosition, MexcPrivateClient } from "../../exchange/mexc/mexcPrivateClient.js";
+import { extractBybitPriceMapByMexcSymbol } from "../../exchange/signalMarketExtractor.js";
 import { FuturesSnapshot } from "../../exchange/types.js";
 import { TelegramClient } from "../../notifications/telegramClient.js";
 import { buildStatusPayload } from "../../services/telegram/statusPayloadBuilder.js";
@@ -306,6 +307,7 @@ export class BootRecoveryService {
       ])
     ];
     const priceBySymbol = extractPriceMap(snapshot);
+    const bybitPriceBySymbol = extractBybitPriceMapByMexcSymbol(snapshot);
     const liveExchangeAccount = await this.resolveBootLiveAccountState(snapshot);
 
     for (const strategyName of strategyNames) {
@@ -322,6 +324,7 @@ export class BootRecoveryService {
         openPositions: strategyOpen,
         latestSnapshot,
         priceBySymbol,
+        bybitPriceBySymbol,
         tickerDeepLinkTemplate: this.collector.tickerDeepLinkTemplate,
         liveExchangeAccount
       };

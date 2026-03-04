@@ -5,7 +5,7 @@ import { RuntimeConfig } from "../config/schema.js";
 import { TelegramReplyMarkup } from "../strategies/types.js";
 
 export function buildSendMessageUrl(cfg: RuntimeConfig): string {
-  return `https://api.telegram.org/bot${cfg.env.telegramBotToken}/sendMessage`;
+  return `${cfg.telegram.apiBaseUrl}/bot${cfg.env.telegramBotToken}/sendMessage`;
 }
 
 export function buildSendMessageBody(cfg: RuntimeConfig, text: string, replyMarkup?: TelegramReplyMarkup) {
@@ -31,19 +31,19 @@ export function buildSendMessageBody(cfg: RuntimeConfig, text: string, replyMark
 }
 
 export function buildGetUpdatesUrl(cfg: RuntimeConfig): string {
-  return `https://api.telegram.org/bot${cfg.env.telegramBotToken}/getUpdates`;
+  return `${cfg.telegram.apiBaseUrl}/bot${cfg.env.telegramBotToken}/getUpdates`;
 }
 
-export function buildGetUpdatesBody(offset?: number) {
+export function buildGetUpdatesBody(cfg: RuntimeConfig, offset?: number) {
   return {
     offset,
-    timeout: 0,
+    timeout: cfg.telegram.getUpdatesLongPollSeconds,
     allowed_updates: ["message", "callback_query"]
   };
 }
 
 export function buildAnswerCallbackQueryUrl(cfg: RuntimeConfig): string {
-  return `https://api.telegram.org/bot${cfg.env.telegramBotToken}/answerCallbackQuery`;
+  return `${cfg.telegram.apiBaseUrl}/bot${cfg.env.telegramBotToken}/answerCallbackQuery`;
 }
 
 export function buildAnswerCallbackBody(callbackQueryId: string, text?: string) {

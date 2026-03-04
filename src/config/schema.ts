@@ -24,7 +24,10 @@ const EndpointSchema = z.object({
   tags: z.array(z.string()).default([])
 });
 
+const ExchangeNameSchema = z.enum(["mexc", "bybit"]);
+
 const ExchangeSchema = z.object({
+  name: ExchangeNameSchema,
   restBaseUrl: z.string().url(),
   privateApi: z
     .object({
@@ -33,8 +36,7 @@ const ExchangeSchema = z.object({
     })
     .optional(),
   tickerDeepLinkTemplate: z.string().min(1),
-  futuresEndpoints: z.array(EndpointSchema).min(1),
-  archiveEndpoints: z.array(EndpointSchema).default([])
+  futuresEndpoints: z.array(EndpointSchema).min(1)
 });
 
 export const FileConfigSchema = z.object({
@@ -48,10 +50,10 @@ export const FileConfigSchema = z.object({
     immediateRunOnBoot: z.boolean().default(true)
   }),
   exchange: z.object({
-    active: z.string().min(1),
     requestTimeoutMs: PositiveInt,
     maxParallelRequests: PositiveInt,
-    exchanges: z.record(z.string(), ExchangeSchema)
+    signal: ExchangeSchema,
+    execution: ExchangeSchema
   }),
   strategies: z.object({
     basePath: z.string().min(1),
@@ -61,27 +63,20 @@ export const FileConfigSchema = z.object({
     enabled: z.boolean(),
     parseMode: z.enum(["HTML", "MarkdownV2", "Markdown"]).default("HTML"),
     disableWebPagePreview: z.boolean().default(true),
-    commandPollMs: PositiveInt
+    commandPollMs: PositiveInt,
+    apiBaseUrl: z.string().url().default("https://api.telegram.org"),
+    requestTimeoutMs: PositiveInt.default(15000),
+    maxRetries: NonNegativeInt.max(10).default(3),
+    retryBaseDelayMs: PositiveInt.default(500),
+    retryMaxDelayMs: PositiveInt.default(5000),
+    getUpdatesLongPollSeconds: NonNegativeInt.max(50).default(0),
+    preferIpv4: z.boolean().default(false)
   }),
   manualExecution: z.object({
     enabled: z.boolean().default(true),
     pendingPollMs: PositiveInt.default(5000),
     autoRefreshMinutes: PositiveInt.default(60),
     reconcileLookbackMinutes: PositiveInt.default(60)
-  }),
-  dataCollector: z.object({
-    enabled: z.boolean().default(true),
-    immediateRunOnBoot: z.boolean().default(true),
-    cadence: CadenceSchema.default({
-      unit: "hour",
-      every: 1,
-      offsetSeconds: 15
-    }),
-    lookbackMinutes: PositiveInt.default(60),
-    maxParallelRequests: PositiveInt.default(3),
-    workerTimeoutMs: PositiveInt.default(3300000),
-    outputDir: z.string().min(1).default("./data/futures_by_symbol"),
-    stateFile: z.string().min(1).default("./data/futures_by_symbol/_state/cursors.json")
   }),
   supabase: z.object({
     enabled: z.boolean(),

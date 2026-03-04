@@ -43,10 +43,10 @@ export class TradeRepository {
     if (!this.db || events.length === 0) return;
 
     const rows = events.map((event) => mapPositionEventRow(cycleRunId, event));
-    const { error } = await this.db.from("lt_position_events").insert(rows);
+    const { error } = await this.db.from("position_events").insert(rows);
 
     if (error) {
-      throw new Error(`Failed to insert lt_position_events: ${error.message}`);
+      throw new Error(`Failed to insert position_events: ${error.message}`);
     }
   }
 
@@ -62,14 +62,14 @@ export class TradeRepository {
     if (!this.db) return [];
 
     const { data, error } = await this.db
-      .from("lt_positions")
+      .from("positions")
       .select(
         "id,strategy_name,symbol,exchange,side,entry_time,entry_price,qty,leverage,margin_usd,notional_usd,funding_usd,take_profit_price,entry_sell_ratio,entry_slippage_bps"
       )
       .eq("status", "OPEN");
 
     if (error) {
-      throw new Error(`Failed to query lt_positions open positions: ${error.message}`);
+      throw new Error(`Failed to query positions open positions: ${error.message}`);
     }
 
     return this.mapOpenPositionRows(data ?? []);
@@ -79,7 +79,7 @@ export class TradeRepository {
     if (!this.db) return [];
 
     const { data, error } = await this.db
-      .from("lt_positions")
+      .from("positions")
       .select(
         "id,strategy_name,symbol,exchange,side,entry_time,entry_price,qty,leverage,margin_usd,notional_usd,funding_usd,take_profit_price,entry_sell_ratio,entry_slippage_bps"
       )
@@ -87,7 +87,7 @@ export class TradeRepository {
       .eq("status", "OPEN");
 
     if (error) {
-      throw new Error(`Failed to query lt_positions open positions by strategy: ${error.message}`);
+      throw new Error(`Failed to query positions open positions by strategy: ${error.message}`);
     }
 
     return this.mapOpenPositionRows(data ?? []);
@@ -109,29 +109,29 @@ export class TradeRepository {
 
     const [positionsResult, entriesResult, exitsResult] = await Promise.all([
       this.db
-        .from("lt_positions")
+        .from("positions")
         .select("status,pnl_usd,funding_usd")
         .eq("strategy_name", strategyName),
       this.db
-        .from("lt_position_events")
+        .from("position_events")
         .select("id", { count: "exact", head: true })
         .eq("strategy_name", strategyName)
         .eq("event_type", "ENTRY"),
       this.db
-        .from("lt_position_events")
+        .from("position_events")
         .select("id", { count: "exact", head: true })
         .eq("strategy_name", strategyName)
         .in("event_type", ["EXIT", "REPLACE", "LIQUIDATION"])
     ]);
 
     if (positionsResult.error) {
-      throw new Error(`Failed to query lt_positions strategy stats: ${positionsResult.error.message}`);
+      throw new Error(`Failed to query positions strategy stats: ${positionsResult.error.message}`);
     }
     if (entriesResult.error) {
-      throw new Error(`Failed to count lt_position_events entries: ${entriesResult.error.message}`);
+      throw new Error(`Failed to count position_events entries: ${entriesResult.error.message}`);
     }
     if (exitsResult.error) {
-      throw new Error(`Failed to count lt_position_events exits: ${exitsResult.error.message}`);
+      throw new Error(`Failed to count position_events exits: ${exitsResult.error.message}`);
     }
 
     let winners = 0;
@@ -196,7 +196,7 @@ export class TradeRepository {
 
   private async insertOpenPosition(event: PositionEvent): Promise<void> {
     const open = await this.db!
-      .from("lt_positions")
+      .from("positions")
       .select("id")
       .eq("strategy_name", event.strategyName)
       .eq("symbol", event.symbol)
@@ -205,16 +205,16 @@ export class TradeRepository {
       .maybeSingle();
 
     if (open.error) {
-      throw new Error(`Failed to query lt_positions open state: ${open.error.message}`);
+      throw new Error(`Failed to query positions open state: ${open.error.message}`);
     }
 
     if (open.data?.id) return;
 
     const row = mapOpenPositionRow(event);
-    const { error } = await this.db!.from("lt_positions").insert(row);
+    const { error } = await this.db!.from("positions").insert(row);
 
     if (error) {
-      throw new Error(`Failed to insert lt_positions: ${error.message}`);
+      throw new Error(`Failed to insert positions: ${error.message}`);
     }
   }
 
@@ -222,14 +222,14 @@ export class TradeRepository {
     const patch = mapClosePositionPatch(event);
 
     const { error } = await this.db!
-      .from("lt_positions")
+      .from("positions")
       .update(patch)
       .eq("strategy_name", event.strategyName)
       .eq("symbol", event.symbol)
       .eq("status", "OPEN");
 
     if (error) {
-      throw new Error(`Failed to close lt_positions: ${error.message}`);
+      throw new Error(`Failed to close positions: ${error.message}`);
     }
   }
 
@@ -238,7 +238,7 @@ export class TradeRepository {
     if (!Number.isFinite(fundingDelta) || fundingDelta === 0) return;
 
     const current = await this.db!
-      .from("lt_positions")
+      .from("positions")
       .select("funding_usd")
       .eq("strategy_name", event.strategyName)
       .eq("symbol", event.symbol)
@@ -247,14 +247,14 @@ export class TradeRepository {
       .maybeSingle();
 
     if (current.error) {
-      throw new Error(`Failed to query lt_positions funding_usd: ${current.error.message}`);
+      throw new Error(`Failed to query positions funding_usd: ${current.error.message}`);
     }
 
     const currentFundingUsd = Number(current.data?.funding_usd ?? 0);
     const nextFundingUsd = currentFundingUsd + fundingDelta;
 
     const { error } = await this.db!
-      .from("lt_positions")
+      .from("positions")
       .update({
         funding_usd: nextFundingUsd
       })
@@ -263,7 +263,7 @@ export class TradeRepository {
       .eq("status", "OPEN");
 
     if (error) {
-      throw new Error(`Failed to update lt_positions funding_usd: ${error.message}`);
+      throw new Error(`Failed to update positions funding_usd: ${error.message}`);
     }
   }
 

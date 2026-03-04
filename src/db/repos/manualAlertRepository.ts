@@ -42,7 +42,7 @@ export class ManualAlertRepository {
     const id = randomUUID();
     if (!this.db) return id;
 
-    const { error } = await this.db.from("lt_manual_alerts").insert({
+    const { error } = await this.db.from("manual_alerts").insert({
       id,
       cycle_run_id: input.cycleRunId,
       strategy_name: input.strategyName,
@@ -55,7 +55,7 @@ export class ManualAlertRepository {
     });
 
     if (error) {
-      throw new Error(`Failed to insert lt_manual_alerts: ${error.message}`);
+      throw new Error(`Failed to insert manual_alerts: ${error.message}`);
     }
 
     return id;
@@ -65,7 +65,7 @@ export class ManualAlertRepository {
     if (!this.db) return;
 
     const { error } = await this.db
-      .from("lt_manual_alerts")
+      .from("manual_alerts")
       .update({
         telegram_message_id: telegramMessageId,
         updated_at: new Date().toISOString()
@@ -73,7 +73,7 @@ export class ManualAlertRepository {
       .eq("id", alertId);
 
     if (error) {
-      throw new Error(`Failed to update lt_manual_alerts telegram_message_id: ${error.message}`);
+      throw new Error(`Failed to update manual_alerts telegram_message_id: ${error.message}`);
     }
   }
 
@@ -81,7 +81,7 @@ export class ManualAlertRepository {
     if (!this.db) return null;
 
     const { data, error } = await this.db
-      .from("lt_manual_alerts")
+      .from("manual_alerts")
       .select(
         "id,cycle_run_id,strategy_name,kind,primary_symbol,secondary_symbol,reason,status,requested_action,payload,telegram_message_id,attempts,last_error,created_at,updated_at,last_checked_at,confirmed_at"
       )
@@ -90,7 +90,7 @@ export class ManualAlertRepository {
       .maybeSingle();
 
     if (error) {
-      throw new Error(`Failed to query lt_manual_alerts by id: ${error.message}`);
+      throw new Error(`Failed to query manual_alerts by id: ${error.message}`);
     }
 
     if (!data) return null;
@@ -130,10 +130,10 @@ export class ManualAlertRepository {
       patch.last_error = errorText;
     }
 
-    const { error } = await this.db.from("lt_manual_alerts").update(patch).eq("id", alertId);
+    const { error } = await this.db.from("manual_alerts").update(patch).eq("id", alertId);
 
     if (error) {
-      throw new Error(`Failed to update lt_manual_alerts waiting state: ${error.message}`);
+      throw new Error(`Failed to update manual_alerts waiting state: ${error.message}`);
     }
   }
 
@@ -142,7 +142,7 @@ export class ManualAlertRepository {
 
     const nowIso = new Date().toISOString();
     const { error } = await this.db
-      .from("lt_manual_alerts")
+      .from("manual_alerts")
       .update({
         status: "CONFIRMED",
         requested_action: action,
@@ -154,7 +154,7 @@ export class ManualAlertRepository {
       .eq("id", alertId);
 
     if (error) {
-      throw new Error(`Failed to update lt_manual_alerts confirmed state: ${error.message}`);
+      throw new Error(`Failed to update manual_alerts confirmed state: ${error.message}`);
     }
   }
 
@@ -165,7 +165,7 @@ export class ManualAlertRepository {
     if (!current) return;
 
     const { error } = await this.db
-      .from("lt_manual_alerts")
+      .from("manual_alerts")
       .update({
         attempts: current.attempts + 1,
         last_error: errorText ?? current.lastError,
@@ -175,7 +175,7 @@ export class ManualAlertRepository {
       .eq("id", alertId);
 
     if (error) {
-      throw new Error(`Failed to increment lt_manual_alerts attempts: ${error.message}`);
+      throw new Error(`Failed to increment manual_alerts attempts: ${error.message}`);
     }
   }
 
@@ -183,7 +183,7 @@ export class ManualAlertRepository {
     if (!this.db) return [];
 
     const { data, error } = await this.db
-      .from("lt_manual_alerts")
+      .from("manual_alerts")
       .select(
         "id,cycle_run_id,strategy_name,kind,primary_symbol,secondary_symbol,reason,status,requested_action,payload,telegram_message_id,attempts,last_error,created_at,updated_at,last_checked_at,confirmed_at"
       )
@@ -192,7 +192,7 @@ export class ManualAlertRepository {
       .limit(limit);
 
     if (error) {
-      throw new Error(`Failed to query waiting lt_manual_alerts: ${error.message}`);
+      throw new Error(`Failed to query waiting manual_alerts: ${error.message}`);
     }
 
     return (data ?? []).map((row) => ({
@@ -221,7 +221,7 @@ export class ManualAlertRepository {
 
     const fromIso = new Date(Date.now() - minutesLookback * 60_000).toISOString();
     const { data, error } = await this.db
-      .from("lt_manual_alerts")
+      .from("manual_alerts")
       .select(
         "id,cycle_run_id,strategy_name,kind,primary_symbol,secondary_symbol,reason,status,requested_action,payload,telegram_message_id,attempts,last_error,created_at,updated_at,last_checked_at,confirmed_at"
       )
@@ -230,7 +230,7 @@ export class ManualAlertRepository {
       .order("created_at", { ascending: false });
 
     if (error) {
-      throw new Error(`Failed to query recent lt_manual_alerts: ${error.message}`);
+      throw new Error(`Failed to query recent manual_alerts: ${error.message}`);
     }
 
     return (data ?? []).map((row) => ({
@@ -262,7 +262,7 @@ export class ManualAlertRepository {
     if (!this.db) return null;
 
     const { data, error } = await this.db
-      .from("lt_manual_alerts")
+      .from("manual_alerts")
       .select(
         "id,cycle_run_id,strategy_name,kind,primary_symbol,secondary_symbol,reason,status,requested_action,payload,telegram_message_id,attempts,last_error,created_at,updated_at,last_checked_at,confirmed_at"
       )
@@ -274,7 +274,7 @@ export class ManualAlertRepository {
       .maybeSingle();
 
     if (error) {
-      throw new Error(`Failed to query latest lt_manual_alerts by kind+symbol: ${error.message}`);
+      throw new Error(`Failed to query latest manual_alerts by kind+symbol: ${error.message}`);
     }
 
     if (!data) return null;
@@ -305,12 +305,12 @@ export class ManualAlertRepository {
 
     const [totalEntries, openedEntries] = await Promise.all([
       this.db
-        .from("lt_manual_alerts")
+        .from("manual_alerts")
         .select("id", { count: "exact", head: true })
         .eq("strategy_name", strategyName)
         .in("kind", ["ENTRY_AVAILABLE", "REPLACEMENT_AVAILABLE"]),
       this.db
-        .from("lt_manual_alerts")
+        .from("manual_alerts")
         .select("id", { count: "exact", head: true })
         .eq("strategy_name", strategyName)
         .in("kind", ["ENTRY_AVAILABLE", "REPLACEMENT_AVAILABLE"])
@@ -319,10 +319,10 @@ export class ManualAlertRepository {
     ]);
 
     if (totalEntries.error) {
-      throw new Error(`Failed to count lt_manual_alerts total entries: ${totalEntries.error.message}`);
+      throw new Error(`Failed to count manual_alerts total entries: ${totalEntries.error.message}`);
     }
     if (openedEntries.error) {
-      throw new Error(`Failed to count lt_manual_alerts opened entries: ${openedEntries.error.message}`);
+      throw new Error(`Failed to count manual_alerts opened entries: ${openedEntries.error.message}`);
     }
 
     const total = Number(totalEntries.count ?? 0);

@@ -27,6 +27,11 @@ interface StrategyExecutionResult {
   output: StrategyWorkerOutput;
 }
 
+interface DeliverySummary {
+  telegramAttempted: number;
+  telegramDelivered: number;
+}
+
 export class StrategyExecutor {
   constructor(private readonly deps: StrategyExecutorDeps) {}
 
@@ -58,9 +63,16 @@ export class StrategyExecutor {
         exchangeAccount
       );
       const output = await runStrategyInWorker(strategy, input);
-      await this.persistStrategyOutput(runId, strategyRunId, strategy.name, output, exchangeAccount, snapshot.collectedAt);
+      const delivery = await this.persistStrategyOutput(
+        runId,
+        strategyRunId,
+        strategy.name,
+        output,
+        exchangeAccount,
+        snapshot.collectedAt
+      );
       await this.deps.repos.strategies.finishRun(strategyRunId, "SUCCESS");
-      this.logStrategySuccess(runId, strategy.name, output);
+      this.logStrategySuccess(runId, strategy.name, output, delivery);
       return { strategyName: strategy.name, output };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -93,9 +105,22 @@ export class StrategyExecutor {
     output: StrategyWorkerOutput,
     exchangeAccount: ExchangeAccountState | null,
     observedAt: string
-  ): Promise<void> {
+  ): Promise<DeliverySummary> {
     const prepared = await this.deps.manualAlertService.prepareForDispatch(runId, strategyName, output.messages);
     const delivered = await this.deps.messageDispatcher.dispatch(prepared);
+    const telegramAttempted = prepared.filter((message) => (message.sendTelegram ?? true) === true).length;
+    const telegramDelivered = delivered.filter((record) => record.telegramMessageId !== null).length;
+
+    if (telegramDelivered < telegramAttempted) {
+      this.deps.logger.error("telegram delivery incomplete", {
+        runId,
+        strategy: strategyName,
+        attempted: telegramAttempted,
+        delivered: telegramDelivered,
+        failed: telegramAttempted - telegramDelivered
+      });
+    }
+
     await this.deps.manualAlertService.applyDelivery(delivered);
 
     await this.deps.repos.strategies.insertMessages(runId, strategyRunId, strategyName, delivered);
@@ -105,7 +130,10 @@ export class StrategyExecutor {
 
     if (output.accountSnapshot) {
       await this.deps.repos.equity.insert(output.accountSnapshot);
-      return;
+      return {
+        telegramAttempted,
+        telegramDelivered
+      };
     }
 
     await captureStrategyAccountSnapshot({
@@ -115,14 +143,26 @@ export class StrategyExecutor {
       liveAccount: exchangeAccount,
       strictLiveAccount: this.deps.strictLiveAccount === true
     });
+
+    return {
+      telegramAttempted,
+      telegramDelivered
+    };
   }
 
-  private logStrategySuccess(runId: string, strategyName: string, output: StrategyWorkerOutput): void {
+  private logStrategySuccess(
+    runId: string,
+    strategyName: string,
+    output: StrategyWorkerOutput,
+    delivery: DeliverySummary
+  ): void {
     this.deps.logger.info("strategy completed", {
       runId,
       strategy: strategyName,
       messages: output.messages.length,
-      events: output.positionEvents.length
+      events: output.positionEvents.length,
+      telegramAttempted: delivery.telegramAttempted,
+      telegramDelivered: delivery.telegramDelivered
     });
   }
 }

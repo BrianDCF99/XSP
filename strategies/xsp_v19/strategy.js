@@ -1,10 +1,8 @@
 /**
  * XSP V19 strategy logic (manual execution mode).
  *
- * Responsibilities:
- * - Parse market snapshot rows
- * - Emit Entry/Exit/Replacement AVAILABLE alerts only
- * - Attach structured manual-alert payloads for button handling
+ * Signal source: Bybit
+ * Execution/account source: MEXC
  */
 import {
   STRATEGY_EMOJI,
@@ -14,6 +12,7 @@ import {
   buildNoSignalTelegramMessage,
   buildReplacementAvailableTelegramMessage
 } from "./telegram.js";
+import { extractBybitSignalRows, mexcToBybitSymbol } from "./market.js";
 
 const LEVERAGE = 5;
 const CONCURRENT_TRADE_CAP = 15;
@@ -52,72 +51,6 @@ function resolveMarginToPut(input) {
   const raw = Math.min(MAX_MARGIN_USD, cashUsd * MARGIN_CASH_PCT);
   if (!Number.isFinite(raw) || raw <= 0) return 0;
   return Math.ceil(raw);
-}
-
-function toRowArray(payload) {
-  if (Array.isArray(payload)) return payload;
-  if (!payload || typeof payload !== "object") return [];
-
-  const obj = payload;
-  if (Array.isArray(obj.data)) return obj.data;
-  if (Array.isArray(obj.result)) return obj.result;
-  if (obj.data && typeof obj.data === "object" && Array.isArray(obj.data.list)) return obj.data.list;
-  if (obj.result && typeof obj.result === "object" && Array.isArray(obj.result.list)) return obj.result.list;
-  return [];
-}
-
-function extractTickerRows(snapshot) {
-  const tickerLike = snapshot.endpoints.filter((endpoint) => endpoint.name.toLowerCase().includes("ticker"));
-  const rows = [];
-
-  for (const endpoint of tickerLike) {
-    rows.push(...toRowArray(endpoint.payload));
-  }
-
-  return rows;
-}
-
-function normalizeTickerRow(row) {
-  if (!row || typeof row !== "object") return null;
-
-  const symbol = row.symbol || row.contract || row.symbolName || row.displayName || row.s;
-  const sellRatio = parseNumber(row.sellRatio ?? row.sell_ratio ?? row.shortRatio ?? row.short_ratio ?? row.accountSellRatio);
-  const hourVolume = parseNumber(
-    row.hourVolume ??
-      row.volumeUsd ??
-      row.volume ??
-      row.vol ??
-      row.turnover24h ??
-      row.quoteVolume ??
-      row.amount24
-  );
-  const lastPrice = parseNumber(row.lastPrice ?? row.price ?? row.last_price ?? row.markPrice ?? row.indexPrice ?? row.close);
-  const openInterest = parseNumber(row.openInterest ?? row.open_interest ?? row.holdVol);
-
-  if (typeof symbol !== "string" || symbol.length === 0) return null;
-  if (sellRatio === null || hourVolume === null || lastPrice === null) return null;
-
-  return {
-    symbol,
-    sellRatio,
-    hourVolume,
-    lastPrice,
-    openInterest
-  };
-}
-
-function normalizeRows(snapshot) {
-  return extractTickerRows(snapshot)
-    .map(normalizeTickerRow)
-    .filter((row) => row !== null);
-}
-
-function buildMarketBySymbol(rows) {
-  const map = new Map();
-  for (const row of rows) {
-    map.set(row.symbol, row);
-  }
-  return map;
 }
 
 function shortLiquidationPrice(entryPrice, leverage) {
@@ -168,33 +101,37 @@ function toSimOpenPositions(input) {
     leverage: Number(position.leverage ?? LEVERAGE),
     marginUsd: Number(position.marginUsd ?? 0),
     notionalUsd: Number(position.notionalUsd ?? 0),
-    entrySlippageBps: Number.isFinite(Number(position.entrySlippageBps)) ? Number(position.entrySlippageBps) : null
+    entrySlippageBps: Number.isFinite(Number(position.entrySlippageBps)) ? Number(position.entrySlippageBps) : null,
+    bybitSymbol: mexcToBybitSymbol(position.symbol),
+    bybitEntryPrice: Number(position.entryPrice)
   }));
 }
 
-function shouldTakeProfit(position, marketRow) {
-  if (!marketRow) return false;
+function shouldTakeProfit(position, mexcPrice) {
+  if (!Number.isFinite(mexcPrice) || mexcPrice <= 0) return false;
   if (position.side !== "SHORT") return false;
   if (position.takeProfitPrice === null) return false;
-  return marketRow.lastPrice <= position.takeProfitPrice;
+  return mexcPrice <= position.takeProfitPrice;
 }
 
-function shouldSellRatioDeltaExit(position, marketRow) {
-  if (!marketRow) return false;
+function shouldSellRatioDeltaExit(position, bybitSellRatio) {
+  if (!Number.isFinite(bybitSellRatio)) return false;
   if (position.side !== "SHORT") return false;
   if (position.entrySellRatio === null) return false;
-  return marketRow.sellRatio - position.entrySellRatio >= SELL_RATIO_EXIT_DELTA;
+  return bybitSellRatio - position.entrySellRatio >= SELL_RATIO_EXIT_DELTA;
 }
 
-function shouldLiquidation(position, marketRow) {
-  if (!marketRow) return false;
+function shouldLiquidation(position, mexcPrice) {
+  if (!Number.isFinite(mexcPrice) || mexcPrice <= 0) return false;
   if (position.side !== "SHORT") return false;
   const liq = shortLiquidationPrice(position.entryPrice, position.leverage);
-  return marketRow.lastPrice >= liq;
+  return mexcPrice >= liq;
 }
 
-function mapExitReason(position, marketRow) {
-  if (shouldLiquidation(position, marketRow)) {
+function mapExitReason(position, market) {
+  if (!market) return null;
+
+  if (shouldLiquidation(position, market.mexcPrice)) {
     return {
       code: "LIQUIDATION",
       label: "Liquidation",
@@ -202,7 +139,7 @@ function mapExitReason(position, marketRow) {
     };
   }
 
-  if (shouldTakeProfit(position, marketRow)) {
+  if (shouldTakeProfit(position, market.mexcPrice)) {
     return {
       code: "TP",
       label: "Take Profit",
@@ -210,7 +147,7 @@ function mapExitReason(position, marketRow) {
     };
   }
 
-  if (shouldSellRatioDeltaExit(position, marketRow)) {
+  if (shouldSellRatioDeltaExit(position, market.sellRatio)) {
     return {
       code: "SELL_RATIO_DELTA",
       label: "Sell Ratio Delta",
@@ -221,8 +158,9 @@ function mapExitReason(position, marketRow) {
   return null;
 }
 
-function createExitAvailableMessage(input, position, marketRow, reason) {
-  const currentPrice = marketRow?.lastPrice ?? position.entryPrice;
+function createExitAvailableMessage(input, position, market, reason) {
+  const currentPrice = Number.isFinite(market?.mexcPrice) ? market.mexcPrice : position.entryPrice;
+  const bybitCurrentPrice = Number.isFinite(market?.bybitPrice) ? market.bybitPrice : position.bybitEntryPrice;
   const pnlPct = computeShortPnlPct(position, currentPrice);
   const pnlUsd = computeShortPnlUsd(position, currentPrice);
   const age = formatAge(position.entryTime, input.nowIso);
@@ -230,6 +168,9 @@ function createExitAvailableMessage(input, position, marketRow, reason) {
 
   const payload = {
     symbol: position.symbol,
+    bybitSymbol: market?.bybitSymbol ?? position.bybitSymbol,
+    bybitEntryPrice: position.bybitEntryPrice,
+    bybitCurrentPrice,
     reasonCode: reason.code,
     reasonLabel: reason.label,
     expectedEventType: reason.expectedEventType,
@@ -259,10 +200,11 @@ function createExitAvailableMessage(input, position, marketRow, reason) {
     sendTelegram: true,
     text: buildExitAvailableTelegramMessage({
       emoji: STRATEGY_EMOJI,
-      exchange: input.exchange.toUpperCase(),
       strategyLabel: STRATEGY_LABEL,
       tickerDeepLinkTemplate: input.tickerDeepLinkTemplate,
       symbol: position.symbol,
+      bybitEntryPrice: position.bybitEntryPrice,
+      bybitCurrentPrice,
       reason: reason.label,
       entryPrice: position.entryPrice,
       pnlPct,
@@ -282,16 +224,16 @@ function createExitAvailableMessage(input, position, marketRow, reason) {
   };
 }
 
-function findReplacementCandidate(openPositions, marketBySymbol) {
+function findReplacementCandidate(openPositions, signalByMexcSymbol) {
   let bestIndex = -1;
   let bestPnlPct = Number.POSITIVE_INFINITY;
 
   for (let i = 0; i < openPositions.length; i += 1) {
     const position = openPositions[i];
-    const market = marketBySymbol.get(position.symbol);
+    const market = signalByMexcSymbol.get(position.symbol);
     if (!market) continue;
 
-    const pnlPct = computeShortPnlPct(position, market.lastPrice);
+    const pnlPct = computeShortPnlPct(position, market.mexcPrice);
     if (pnlPct > REPLACEMENT_THRESHOLD_PCT) continue;
 
     if (pnlPct < bestPnlPct) {
@@ -306,15 +248,17 @@ function findReplacementCandidate(openPositions, marketBySymbol) {
 function selectSignals(rows, openSymbols) {
   return rows
     .filter((row) => row.sellRatio <= SELL_RATIO_MAX && row.hourVolume >= MIN_HOUR_VOLUME)
-    .filter((row) => !openSymbols.has(row.symbol))
+    .filter((row) => !openSymbols.has(row.mexcSymbol))
     .sort((a, b) => a.sellRatio - b.sellRatio);
 }
 
 function createEntryAvailableMessage(input, signal, currentOpenTrades) {
   const marginToPut = resolveMarginToPut(input);
   const payload = {
-    symbol: signal.symbol,
-    priceAtAlert: signal.lastPrice,
+    symbol: signal.mexcSymbol,
+    bybitSymbol: signal.bybitSymbol,
+    bybitPriceAtAlert: signal.bybitPrice,
+    priceAtAlert: signal.mexcPrice,
     marginToPut,
     sellRatioNow: signal.sellRatio,
     hourVolumeNow: signal.hourVolume,
@@ -333,36 +277,34 @@ function createEntryAvailableMessage(input, signal, currentOpenTrades) {
 
   return {
     type: "ENTRY",
-    symbol: signal.symbol,
+    symbol: signal.mexcSymbol,
     sendTelegram: true,
     text: buildEntryAvailableTelegramMessage({
       emoji: STRATEGY_EMOJI,
-      exchange: input.exchange.toUpperCase(),
       strategyLabel: STRATEGY_LABEL,
       tickerDeepLinkTemplate: input.tickerDeepLinkTemplate,
-      symbol: signal.symbol,
-      priceAtAlert: signal.lastPrice,
+      symbol: signal.mexcSymbol,
+      bybitPriceAtAlert: signal.bybitPrice,
+      mexcPriceAtAlert: signal.mexcPrice,
       marginToPut,
-      sellRatioMax: SELL_RATIO_MAX,
-      minHourVolume: MIN_HOUR_VOLUME,
-      concurrentCap: CONCURRENT_TRADE_CAP,
-      currentOpenTrades,
       sellRatioNow: signal.sellRatio,
-      hourVolumeNow: signal.hourVolume
+      hourVolumeNow: signal.hourVolume,
+      currentOpenTrades
     }),
     manualAlert: {
       kind: "ENTRY_AVAILABLE",
-      primarySymbol: signal.symbol,
+      primarySymbol: signal.mexcSymbol,
       payload,
       buttons: ["OPENED", "REFRESH"]
     }
   };
 }
 
-function createReplacementMessage(input, signal, loser, marketBySymbol) {
+function createReplacementMessage(input, signal, loser, signalByMexcSymbol) {
   const marginToPut = resolveMarginToPut(input);
-  const loserMarket = marketBySymbol.get(loser.symbol);
-  const loserCurrentPrice = loserMarket ? loserMarket.lastPrice : loser.entryPrice;
+  const loserMarket = signalByMexcSymbol.get(loser.symbol);
+  const loserCurrentPrice = loserMarket ? loserMarket.mexcPrice : loser.entryPrice;
+  const loserBybitCurrent = loserMarket ? loserMarket.bybitPrice : loser.bybitEntryPrice;
   const loserPnlPct = computeShortPnlPct(loser, loserCurrentPrice);
   const loserPnlUsd = computeShortPnlUsd(loser, loserCurrentPrice);
   const loserAge = formatAge(loser.entryTime, input.nowIso);
@@ -370,6 +312,9 @@ function createReplacementMessage(input, signal, loser, marketBySymbol) {
 
   const payload = {
     loserSymbol: loser.symbol,
+    loserBybitSymbol: loserMarket?.bybitSymbol ?? loser.bybitSymbol,
+    loserBybitEntryPrice: loser.bybitEntryPrice,
+    loserBybitCurrentPrice: loserBybitCurrent,
     loserReasonLabel: "Replacement",
     loserEntryPrice: loser.entryPrice,
     loserCurrentPrice,
@@ -384,8 +329,10 @@ function createReplacementMessage(input, signal, loser, marketBySymbol) {
     loserNotionalUsd: loser.notionalUsd,
     loserQty: loser.qty,
     loserEntrySlippageBps: loser.entrySlippageBps,
-    newSymbol: signal.symbol,
-    newPriceAtAlert: signal.lastPrice,
+    newSymbol: signal.mexcSymbol,
+    newBybitSymbol: signal.bybitSymbol,
+    newBybitPriceAtAlert: signal.bybitPrice,
+    newPriceAtAlert: signal.mexcPrice,
     marginToPut,
     newSellRatioNow: signal.sellRatio,
     newHourVolumeNow: signal.hourVolume,
@@ -402,14 +349,15 @@ function createReplacementMessage(input, signal, loser, marketBySymbol) {
 
   return {
     type: "ENTRY",
-    symbol: signal.symbol,
+    symbol: signal.mexcSymbol,
     sendTelegram: true,
     text: buildReplacementAvailableTelegramMessage({
       emoji: STRATEGY_EMOJI,
-      exchange: input.exchange.toUpperCase(),
       strategyLabel: STRATEGY_LABEL,
       tickerDeepLinkTemplate: input.tickerDeepLinkTemplate,
       loserSymbol: loser.symbol,
+      loserBybitEntryPrice: loser.bybitEntryPrice,
+      loserBybitCurrentPrice: loserBybitCurrent,
       loserEntryPrice: loser.entryPrice,
       loserPnlPct,
       loserPnlUsd,
@@ -417,18 +365,17 @@ function createReplacementMessage(input, signal, loser, marketBySymbol) {
       loserCurrentPrice,
       loserTakeProfitPrice: loser.takeProfitPrice ?? 0,
       loserLiquidationPrice: loserLiq,
-      newSymbol: signal.symbol,
-      newPriceAtAlert: signal.lastPrice,
+      newSymbol: signal.mexcSymbol,
+      newBybitPriceAtAlert: signal.bybitPrice,
+      newMexcPriceAtAlert: signal.mexcPrice,
       marginToPut,
-      sellRatioMax: SELL_RATIO_MAX,
-      minHourVolume: MIN_HOUR_VOLUME,
       newSellRatioNow: signal.sellRatio,
       newHourVolumeNow: signal.hourVolume,
       replacementThresholdPct: REPLACEMENT_THRESHOLD_PCT
     }),
     manualAlert: {
       kind: "REPLACEMENT_AVAILABLE",
-      primarySymbol: signal.symbol,
+      primarySymbol: signal.mexcSymbol,
       secondarySymbol: loser.symbol,
       reason: "Replacement",
       payload,
@@ -445,30 +392,48 @@ function appendNoSignalMessage(messages, input) {
     sendTelegram: false,
     text: buildNoSignalTelegramMessage({
       emoji: STRATEGY_EMOJI,
-      exchange: input.exchange.toUpperCase(),
       strategyLabel: STRATEGY_LABEL
     })
   });
 }
 
-function uniqueSymbols(rows) {
-  const set = new Set(rows.map((row) => row.symbol));
+function uniqueMexcSymbols(rows) {
+  const set = new Set(rows.map((row) => row.mexcSymbol));
   return [...set];
 }
 
+function assertBybitSignalAvailability(summary) {
+  if (summary.bybitTickerCount <= 0) {
+    throw new Error("Bybit signal unavailable: no ticker rows returned");
+  }
+
+  if (summary.bybitSellRatioCount <= 0) {
+    throw new Error("Bybit signal unavailable: no account-ratio rows returned");
+  }
+
+  if (summary.rows.length <= 0) {
+    throw new Error(
+      `Bybit signal unavailable: unable to merge ticker (${summary.bybitTickerCount}) with account-ratio (${summary.bybitSellRatioCount})`
+    );
+  }
+}
+
 export async function entry(input) {
-  const rows = normalizeRows(input.snapshot);
-  const marketBySymbol = buildMarketBySymbol(rows);
+  const summary = extractBybitSignalRows(input.snapshot);
+  assertBybitSignalAvailability(summary);
+
+  const rows = summary.rows;
+  const signalByMexcSymbol = new Map(rows.map((row) => [row.mexcSymbol, row]));
   const openPositions = toSimOpenPositions(input);
 
   const messages = [];
 
   for (const position of openPositions) {
-    const marketRow = marketBySymbol.get(position.symbol);
-    const reason = mapExitReason(position, marketRow);
+    const market = signalByMexcSymbol.get(position.symbol);
+    const reason = mapExitReason(position, market);
     if (!reason) continue;
 
-    messages.push(createExitAvailableMessage(input, position, marketRow, reason));
+    messages.push(createExitAvailableMessage(input, position, market, reason));
   }
 
   const openSymbols = new Set(openPositions.map((position) => position.symbol));
@@ -476,13 +441,13 @@ export async function entry(input) {
 
   for (const signal of signals) {
     if (openPositions.length >= CONCURRENT_TRADE_CAP) {
-      const replaceIndex = findReplacementCandidate(openPositions, marketBySymbol);
+      const replaceIndex = findReplacementCandidate(openPositions, signalByMexcSymbol);
       if (replaceIndex < 0) {
         continue;
       }
 
       const loser = openPositions[replaceIndex];
-      messages.push(createReplacementMessage(input, signal, loser, marketBySymbol));
+      messages.push(createReplacementMessage(input, signal, loser, signalByMexcSymbol));
       continue;
     }
 
@@ -496,6 +461,6 @@ export async function entry(input) {
     messages,
     positionEvents: [],
     accountSnapshot: null,
-    trackedSymbols: uniqueSymbols(rows)
+    trackedSymbols: uniqueMexcSymbols(rows)
   };
 }

@@ -19,7 +19,7 @@ export class StrategyRepository {
     const id = randomUUID();
     if (!this.db) return id;
 
-    const { error } = await this.db.from("lt_strategy_runs").insert({
+    const { error } = await this.db.from("strategy_runs").insert({
       id,
       run_id: runId,
       strategy_name: strategyName,
@@ -28,7 +28,7 @@ export class StrategyRepository {
     });
 
     if (error) {
-      throw new Error(`Failed to insert lt_strategy_runs: ${error.message}`);
+      throw new Error(`Failed to insert strategy_runs: ${error.message}`);
     }
 
     return id;
@@ -38,7 +38,7 @@ export class StrategyRepository {
     if (!this.db) return;
 
     const { error } = await this.db
-      .from("lt_strategy_runs")
+      .from("strategy_runs")
       .update({
         status,
         error_message: errorMessage ?? null,
@@ -47,7 +47,7 @@ export class StrategyRepository {
       .eq("id", runId);
 
     if (error) {
-      throw new Error(`Failed to update lt_strategy_runs: ${error.message}`);
+      throw new Error(`Failed to update strategy_runs: ${error.message}`);
     }
   }
 
@@ -60,10 +60,10 @@ export class StrategyRepository {
     if (!this.db || records.length === 0) return;
 
     const rows = mapMessageRows(cycleRunId, strategyRunId, strategyName, records);
-    const { error } = await this.db.from("lt_strategy_messages").insert(rows);
+    const { error } = await this.db.from("strategy_messages").insert(rows);
 
     if (error) {
-      throw new Error(`Failed to insert lt_strategy_messages: ${error.message}`);
+      throw new Error(`Failed to insert strategy_messages: ${error.message}`);
     }
   }
 
@@ -71,12 +71,12 @@ export class StrategyRepository {
     if (!this.db || symbols.length === 0) return;
 
     const rows = mapTrackedSymbolRows(strategyName, symbols, new Date().toISOString());
-    const { error } = await this.db.from("lt_tracked_symbols").upsert(rows, {
+    const { error } = await this.db.from("tracked_symbols").upsert(rows, {
       onConflict: "strategy_name,symbol"
     });
 
     if (error) {
-      throw new Error(`Failed to upsert lt_tracked_symbols: ${error.message}`);
+      throw new Error(`Failed to upsert tracked_symbols: ${error.message}`);
     }
   }
 
@@ -84,12 +84,12 @@ export class StrategyRepository {
     if (!this.db) return [];
 
     const { data, error } = await this.db
-      .from("lt_tracked_symbols")
+      .from("tracked_symbols")
       .select("symbol")
       .eq("strategy_name", strategyName);
 
     if (error) {
-      throw new Error(`Failed to query lt_tracked_symbols: ${error.message}`);
+      throw new Error(`Failed to query tracked_symbols: ${error.message}`);
     }
 
     return (data ?? []).map((row) => String(row.symbol));

@@ -4,7 +4,7 @@
 - if multiple coins have a funding event it should be a single message with all the coins
 
 ## /info strategyName Command
-🎯 Exchange: StrategyName V#
+🐦‍🔥 StrategyName V#
 
 Leverage: #x
 Margin: $ (could be min($, cash * 1%) kinda thing so the whole thing included)
@@ -21,18 +21,18 @@ Exit:
 
 
 ## /strategyName Command
-🎯 Exchange: StrategyName V#
+🐦‍🔥 StrategyName V#
 📈 Open Positions
 
-1. TICKER
+1. TICKER - Bybit: E: $priceatEntrty | C: $currPrice
       E: $priceAtEntry | PNL: currPNL% / $currPNL | DD - HH:MM (time since Entry)
       C: $currPrice | TP: $takeProfit | L: $liquidation
 
-2. TICKER
+2. TICKER - Bybit: E: $priceatEntrty | C: $currPrice
       E: $priceAtEntry | PNL: currPNL% / $currPNL  | DD - HH:MM (time since Entry)
       C: $currPrice | TP: $takeProfit | L: $liquidation
 
-3. TICKER
+3. TICKER - Bybit: E: $priceatEntrty | C: $currPrice
       E: $priceAtEntry | PNL: currPNL% / $currPNL  | DD - HH:MM (time since Entry)
       C: $currPrice | TP: $takeProfit | L: $liquidation
 
@@ -54,7 +54,7 @@ Net Funding: $
 
 
 ## Funding Update
-🎯 Exchange: StrategyName V#
+🐦‍🔥 StrategyName V#
 💸 Fudnding Update:
 
 1. TICKER: $funding | Net: $netFunding (+ or -, NET as in accumulation for all the funding updates while the trade was open)
@@ -67,10 +67,10 @@ M: $marginInUse | N: $openNotional
 
 
 ## Exit Available
-🎯 Exchange: StrategyName V#
+🐦‍🔥 StrategyName V#
 ✅(❌ - for loss)EXIT: Reason (Each strat has own exit reasons)
 
-TICKER
+TICKER - Bybit: E: $priceatEntrty | C: $currPrice
     E: $priceAtEntry | PNL: currPNL% / $currPNL  | DD - HH:MM (time since Entry)
     C: $currPrice | TP: $takeProfit | L: $liquidation
 
@@ -78,7 +78,7 @@ TICKER
 
 
 ## Exit Confirmed
-🎯 Exchange: StrategyName V#
+🐦‍🔥 StrategyName V#
 ✅(❌ - for loss)EXIT: Reason (Each strat has own exit reasons)
 
 TICKER:
@@ -93,40 +93,52 @@ M: $marginInUse | N: $openNotional
 
 
 ## Entry Available
-🎯 Exchange: StrategyName V#
+🐦‍🔥 StrategyName V#
 🟢 Entry Available:
 
-TICKER: $priceAtAlert | M: $MarginToput
-    - Sell Ratio <= 0.2 (now: x.xxxx)
-    - Volume >= 1,000,000 (now: x,xxx,xxx)
-    - Live trades < 15 (now: #)
+TICKER:
+Bybit: E: $priceAtAlert
+Mexc:  E: $priceAtAlert
+
+Margin: $MarginToPut
+
+    x.xxxx
+    x,xxx,xxx
+    #
 
 *** Opened | Refresh *** Buttons
 
 
 ## Replacement Available
-🎯 Exchange: StrategyName V#
+🐦‍🔥 StrategyName V#
 🚨 Replacement:
 
-Loser: TICKER
+Loser: TICKER - Bybit: E: $priceatEntrty | C: $currPrice
     E: $priceAtEntry | PNL: currPNL% / $currPNL  | DD - HH:MM (time since Entry)
     C: $currPrice | TP: $takeProfit | L: $liquidation
 
 New:
-TICKER: $priceAtAlert | M: $MarginToPut
-    - Sell Ratio <= 0.2 (now: x.xxxx)
-    - Volume >= 1,000,000 (now: x,xxx,xxx)
-    - Replacement threshold: -5.00% (loser now: currPNL%)
+TICKER:
+Bybit: E: $priceAtAlert
+Mexc:  E: $priceAtAlert
+
+Margin: $MarginToPut
+
+    x.xxxx
+    x,xxx,xxx
+    currPNL%
 
 *** Opened | Refresh *** Buttons
 
 
 ## Entry Confirmed
-🎯 Exchange: StrategyName V#
+🐦‍🔥 StrategyName V#
 🍀 Opened Trade:
 
 TICKER
-E: $entryPrice | RE: $realizedPrice TP: $takeProfit | L: $liquidation
+E: $entryPrice | RE: $realizedPrice
+TP: $takeProfit | L: $liquidation
+
 Entry Slippage: x.xx bps
 
 Account Update:
@@ -135,14 +147,14 @@ M: $marginInUse | N: $openNotional
 
 
 ## Waiting For Confirmation
-🎯 Exchange: StrategyName V#
+🐦‍🔥 StrategyName V#
 ⏳ Waiting for trade confirmation:
+
 TICKER
-Bot will keep polling MEXC and send confirmed update once fill appears.
 
 
 ## External Position Detected
-🎯 Exchange: StrategyName V#
+🐦‍🔥 StrategyName V#
 🧭 External Position Detected:
 
 TICKER

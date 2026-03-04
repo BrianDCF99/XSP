@@ -2,6 +2,8 @@
 
 ## Account Information
 - Leverage: 5x
+- Signal Source: Bybit (sell ratio + volume + Bybit alert prices)
+- Execution Source: MEXC (manual fills, account source of truth, MEXC prices for PNL/TP/Liq)
 - Starting Equity: Live MEXC equity at strategy start
 - Cash: Equity - Margin in use
 - Margin: min(500, Cash*0.01)

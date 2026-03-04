@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
 import YAML from "yaml";
-import { assertExchangeExists, assertRequiredSecrets, assertStrategyFoldersConfigured } from "./configAssertions.js";
+import { assertExchangePair, assertRequiredSecrets, assertStrategyFoldersConfigured } from "./configAssertions.js";
 import { buildRuntimeConfig } from "./runtimeConfigBuilder.js";
 import { EnvSchema, FileConfigSchema, RuntimeConfig } from "./schema.js";
 
@@ -24,10 +24,10 @@ export function loadConfig(configPath = path.resolve(process.cwd(), "config.yaml
   const fileConfig = FileConfigSchema.parse(parsedYaml);
   const env = EnvSchema.parse(process.env);
 
-  assertExchangeExists(fileConfig.exchange.active, fileConfig.exchange.exchanges);
   assertStrategyFoldersConfigured(fileConfig.strategies.active);
 
   const runtimeConfig = buildRuntimeConfig(fileConfig, env);
+  assertExchangePair(runtimeConfig);
   assertRequiredSecrets(runtimeConfig);
   return runtimeConfig;
 }

@@ -11,7 +11,7 @@ export class RunRepository {
     const id = randomUUID();
     if (!this.db) return id;
 
-    const { error } = await this.db.from("lt_runs").insert({
+    const { error } = await this.db.from("runs").insert({
       id,
       exchange,
       status: "RUNNING",
@@ -19,7 +19,7 @@ export class RunRepository {
     });
 
     if (error) {
-      throw new Error(`Failed to insert lt_runs: ${error.message}`);
+      throw new Error(`Failed to insert runs: ${error.message}`);
     }
 
     return id;
@@ -29,7 +29,7 @@ export class RunRepository {
     if (!this.db) return;
 
     const { error } = await this.db
-      .from("lt_runs")
+      .from("runs")
       .update({
         status,
         error_message: errorMessage ?? null,
@@ -38,7 +38,7 @@ export class RunRepository {
       .eq("id", id);
 
     if (error) {
-      throw new Error(`Failed to update lt_runs: ${error.message}`);
+      throw new Error(`Failed to update runs: ${error.message}`);
     }
   }
 }

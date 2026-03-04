@@ -1,8 +1,8 @@
 /**
  * Composes all runtime dependencies for LiveTrader.
  */
+import { setDefaultResultOrder } from "node:dns";
 import { loadConfig } from "../config/loadConfig.js";
-import { DataCollectorService } from "../dataCollector/dataCollectorService.js";
 import { BootRecoveryService } from "../core/boot/bootRecoveryService.js";
 import { CycleRunner } from "../core/cycleRunner.js";
 import { RunLoop } from "../core/runLoop.js";
@@ -21,10 +21,18 @@ import { LiveTraderApp } from "./liveTraderApp.js";
 export function createApp(): LiveTraderApp {
   const cfg = loadConfig();
   const logger = createLogger(cfg.env.nodeEnv !== "production");
+
+  if (cfg.telegram.enabled && cfg.telegram.preferIpv4) {
+    setDefaultResultOrder("ipv4first");
+    logger.info("dns result order set", {
+      order: "ipv4first",
+      reason: "telegram.preferIpv4"
+    });
+  }
+
   const db = createSupabaseClient(cfg);
   const repos = createRepositories(db);
   const collector = new ExchangeCollector(cfg, logger);
-  const dataCollector = new DataCollectorService(cfg, logger);
   const telegram = new TelegramClient(cfg, logger);
   const messageDispatcher = new MessageDispatcher(telegram);
   const strategies = loadStrategyRegistry(cfg);
@@ -64,22 +72,18 @@ export function createApp(): LiveTraderApp {
   );
 
   logger.info("livetrader bootstrapped", {
-    exchange: cfg.exchange.active,
+    executionExchange: cfg.exchange.execution.name,
+    signalExchange: cfg.exchange.signal.name,
     strategyCount: strategies.length,
     scheduleUnit: cfg.scheduler.cadence.unit,
     scheduleEvery: cfg.scheduler.cadence.every,
-    offsetSeconds: cfg.scheduler.cadence.offsetSeconds,
-    archiveCollectorEnabled: cfg.dataCollector.enabled,
-    archiveScheduleUnit: cfg.dataCollector.cadence.unit,
-    archiveScheduleEvery: cfg.dataCollector.cadence.every,
-    archiveOffsetSeconds: cfg.dataCollector.cadence.offsetSeconds
+    offsetSeconds: cfg.scheduler.cadence.offsetSeconds
   });
 
   return new LiveTraderApp(runLoop, {
     onBeforeStart: async () => {
       await bootRecovery.run();
       await manualActionProcessor.start();
-      await dataCollector.start();
       if (cfg.manualExecution.enabled) {
         await manualActionProcessor.runGlobalRefresh("auto");
       }
@@ -89,7 +93,6 @@ export function createApp(): LiveTraderApp {
     },
     onBeforeStop: async () => {
       await telegramCommands.stop();
-      await dataCollector.stop();
     }
   });
 }

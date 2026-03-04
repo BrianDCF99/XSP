@@ -36,8 +36,11 @@ function parsePrice(row: Record<string, unknown>): number | null {
 
 export function extractPriceMap(snapshot: FuturesSnapshot): Map<string, number> {
   const priceMap = new Map<string, number>();
+  const execution = snapshot.executionExchange.toLowerCase();
 
   for (const endpoint of snapshot.endpoints) {
+    if (endpoint.sourceExchange.toLowerCase() !== execution) continue;
+
     const name = endpoint.name.toLowerCase();
     const isTickerLike = name.includes("ticker") || name.includes("mark") || name.includes("price");
     if (!isTickerLike) continue;

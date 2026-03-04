@@ -1,6 +1,6 @@
 /**
  * XSP V19 Telegram message formatter.
- * Spacing intentionally mirrors TG_Messages.md templates.
+ * Spacing intentionally mirrors strategies/xsp_v19/telegram.md.
  */
 export const STRATEGY_LABEL = "XSP V19";
 export const STRATEGY_LEVERAGE = 5;
@@ -47,6 +47,15 @@ function fmtBps(value) {
   return `${value.toFixed(2)} bps`;
 }
 
+function fmtAge(value) {
+  if (typeof value !== "string" || value.length === 0) return "00 - 00:00";
+  return value.replace("-", " - ");
+}
+
+function titleLine(input) {
+  return `${input.emoji} ${input.strategyLabel}`;
+}
+
 function toAccountLines(account) {
   return [
     "Account Update:",
@@ -55,58 +64,47 @@ function toAccountLines(account) {
   ];
 }
 
-function toPositionSnapshotLines(input) {
-  const ticker = buildTickerLink(input.tickerDeepLinkTemplate, input.symbol);
-
-  return [
-    `${ticker}`,
-    `    E: ${fmtPrice(input.entryPrice)} | PNL: ${fmtPct(input.pnlPct)} / ${fmtSignedUsd(input.pnlUsd)}  | ${input.age}`,
-    `    C: ${fmtPrice(input.currentPrice)} | TP: ${fmtPrice(input.takeProfitPrice)} | L: ${fmtPrice(input.liquidationPrice)}`
-  ];
-}
-
 export function buildEntryAvailableTelegramMessage(input) {
   const ticker = buildTickerLink(input.tickerDeepLinkTemplate, input.symbol);
 
   return [
-    `${input.emoji} ${input.exchange}: ${input.strategyLabel}`,
+    titleLine(input),
     "🟢 Entry Available:",
     "",
-    `${ticker}: ${fmtPrice(input.priceAtAlert)} | M: ${fmtRoundedUsd(Number(input.marginToPut ?? 0))}`,
-    `    - Sell Ratio &lt;= ${input.sellRatioMax} (now: ${Number(input.sellRatioNow ?? 0).toFixed(4)})`,
-    `    - Volume >= ${Number(input.minHourVolume ?? 0).toLocaleString()} (now: ${Number(input.hourVolumeNow ?? 0).toLocaleString()})`,
-    `    - Live trades &lt; ${input.concurrentCap} (now: ${input.currentOpenTrades})`
+    `${ticker}:`,
+    `Bybit: E: ${fmtPrice(input.bybitPriceAtAlert)}`,
+    `Mexc:  E: ${fmtPrice(input.mexcPriceAtAlert)}`,
+    "",
+    `Margin: ${fmtRoundedUsd(Number(input.marginToPut ?? 0))}`,
+    "",
+    `    ${Number(input.sellRatioNow ?? 0).toFixed(4)}`,
+    `    ${Number(input.hourVolumeNow ?? 0).toLocaleString()}`,
+    `    ${Number(input.currentOpenTrades ?? 0)}`
   ].join("\n");
 }
 
 export function buildReplacementAvailableTelegramMessage(input) {
-  const loserLines = toPositionSnapshotLines({
-    tickerDeepLinkTemplate: input.tickerDeepLinkTemplate,
-    symbol: input.loserSymbol,
-    entryPrice: input.loserEntryPrice,
-    pnlPct: input.loserPnlPct,
-    pnlUsd: input.loserPnlUsd,
-    age: input.loserAge,
-    currentPrice: input.loserCurrentPrice,
-    takeProfitPrice: input.loserTakeProfitPrice,
-    liquidationPrice: input.loserLiquidationPrice
-  });
-
+  const loserTicker = buildTickerLink(input.tickerDeepLinkTemplate, input.loserSymbol);
   const newTicker = buildTickerLink(input.tickerDeepLinkTemplate, input.newSymbol);
 
   return [
-    `${input.emoji} ${input.exchange}: ${input.strategyLabel}`,
+    titleLine(input),
     "🚨 Replacement:",
     "",
-    `Loser: ${loserLines[0]}`,
-    loserLines[1],
-    loserLines[2],
+    `Loser: ${loserTicker} - Bybit: E: ${fmtPrice(input.loserBybitEntryPrice)} | C: ${fmtPrice(input.loserBybitCurrentPrice)}`,
+    `    E: ${fmtPrice(input.loserEntryPrice)} | PNL: ${fmtPct(input.loserPnlPct)} / ${fmtSignedUsd(input.loserPnlUsd)}  | ${fmtAge(input.loserAge)}`,
+    `    C: ${fmtPrice(input.loserCurrentPrice)} | TP: ${fmtPrice(input.loserTakeProfitPrice)} | L: ${fmtPrice(input.loserLiquidationPrice)}`,
     "",
     "New:",
-    `${newTicker}: ${fmtPrice(input.newPriceAtAlert)} | M: ${fmtRoundedUsd(Number(input.marginToPut ?? 0))}`,
-    `    - Sell Ratio &lt;= ${input.sellRatioMax} (now: ${Number(input.newSellRatioNow ?? 0).toFixed(4)})`,
-    `    - Volume >= ${Number(input.minHourVolume ?? 0).toLocaleString()} (now: ${Number(input.newHourVolumeNow ?? 0).toLocaleString()})`,
-    `    - Replacement threshold: ${Number(input.replacementThresholdPct ?? 0).toFixed(2)}% (loser now: ${Number(input.loserPnlPct ?? 0).toFixed(2)}%)`
+    `${newTicker}:`,
+    `Bybit: E: ${fmtPrice(input.newBybitPriceAtAlert)}`,
+    `Mexc:  E: ${fmtPrice(input.newMexcPriceAtAlert)}`,
+    "",
+    `Margin: ${fmtRoundedUsd(Number(input.marginToPut ?? 0))}`,
+    "",
+    `    ${Number(input.newSellRatioNow ?? 0).toFixed(4)}`,
+    `    ${Number(input.newHourVolumeNow ?? 0).toLocaleString()}`,
+    `    ${Number(input.loserPnlPct ?? 0).toFixed(2)}%`
   ].join("\n");
 }
 
@@ -114,7 +112,7 @@ export function buildTrackDecisionTelegramMessage(input) {
   const ticker = buildTickerLink(input.tickerDeepLinkTemplate, input.symbol);
 
   return [
-    `${input.emoji} ${input.exchange}: ${input.strategyLabel}`,
+    titleLine(input),
     "🧭 External Position Detected:",
     "",
     `${ticker}`,
@@ -127,11 +125,11 @@ export function buildExitAvailableTelegramMessage(input) {
   const icon = input.pnlPct >= 0 ? "✅" : "❌";
 
   return [
-    `${input.emoji} ${input.exchange}: ${input.strategyLabel}`,
+    titleLine(input),
     `${icon}EXIT: ${input.reason}`,
     "",
-    `${ticker}`,
-    `    E: ${fmtPrice(input.entryPrice)} | PNL: ${fmtPct(input.pnlPct)} / ${fmtSignedUsd(input.pnlUsd)}  | ${input.age}`,
+    `${ticker} - Bybit: E: ${fmtPrice(input.bybitEntryPrice)} | C: ${fmtPrice(input.bybitCurrentPrice)}`,
+    `    E: ${fmtPrice(input.entryPrice)} | PNL: ${fmtPct(input.pnlPct)} / ${fmtSignedUsd(input.pnlUsd)}  | ${fmtAge(input.age)}`,
     `    C: ${fmtPrice(input.currentPrice)} | TP: ${fmtPrice(input.takeProfitPrice)} | L: ${fmtPrice(input.liquidationPrice)}`
   ].join("\n");
 }
@@ -140,11 +138,13 @@ export function buildEntryConfirmedTelegramMessage(input) {
   const ticker = buildTickerLink(input.tickerDeepLinkTemplate, input.symbol);
 
   return [
-    `${input.emoji} ${input.exchange}: ${input.strategyLabel}`,
+    titleLine(input),
     "🍀 Opened Trade:",
     "",
     `${ticker}`,
-    `E: ${fmtPrice(input.entryPrice)} | RE: ${fmtPrice(input.realizedEntryPrice)} TP: ${fmtPrice(input.takeProfitPrice)} | L: ${fmtPrice(input.liquidationPrice)}`,
+    `E: ${fmtPrice(input.entryPrice)} | RE: ${fmtPrice(input.realizedEntryPrice)}`,
+    `TP: ${fmtPrice(input.takeProfitPrice)} | L: ${fmtPrice(input.liquidationPrice)}`,
+    "",
     `Entry Slippage: ${fmtBps(input.entrySlippageBps)}`,
     "",
     ...toAccountLines(input.account)
@@ -156,7 +156,7 @@ export function buildExitConfirmedTelegramMessage(input) {
   const icon = input.pnlUsd >= 0 ? "✅" : "❌";
 
   return [
-    `${input.emoji} ${input.exchange}: ${input.strategyLabel}`,
+    titleLine(input),
     `${icon}EXIT: ${input.reason}`,
     "",
     `${ticker}:`,
@@ -171,11 +171,13 @@ export function buildExitConfirmedTelegramMessage(input) {
 
 export function buildWaitingForConfirmationMessage(input) {
   const ticker = buildTickerLink(input.tickerDeepLinkTemplate, input.symbol);
+
   return [
-    `${input.emoji} ${input.exchange}: ${input.strategyLabel}`,
+    titleLine(input),
     "⏳ Waiting for trade confirmation:",
+    "",
     `${ticker}`,
-    "Bot will keep polling MEXC and send confirmed update once fill appears."
+    ""
   ].join("\n");
 }
 
@@ -191,7 +193,7 @@ export function buildFundingTelegramMessage(input) {
   }
 
   return [
-    `${input.emoji} ${input.exchange}: ${input.strategyLabel}`,
+    titleLine(input),
     "💸 Fudnding Update:",
     "",
     ...lines,
@@ -202,7 +204,7 @@ export function buildFundingTelegramMessage(input) {
 
 export function buildInfoCommandMessage(input) {
   return [
-    `${input.emoji} ${input.exchange}: ${input.strategyLabel}`,
+    titleLine(input),
     "",
     `Leverage: ${input.leverage}x`,
     "Margin: min($500, cash * 1%)",
@@ -221,8 +223,8 @@ export function buildInfoCommandMessage(input) {
 
 function buildOpenPositionBlock(index, item) {
   return [
-    `${index}. ${buildTickerLink(item.tickerDeepLinkTemplate, item.symbol)}`,
-    `      E: ${fmtPrice(item.entryPrice)} | PNL: ${fmtPct(item.pnlPct)} / ${fmtSignedUsd(item.pnlUsd)}  | ${item.age}`,
+    `${index}. ${buildTickerLink(item.tickerDeepLinkTemplate, item.symbol)} - Bybit: E: ${fmtPrice(item.bybitEntryPrice)} | C: ${fmtPrice(item.bybitCurrentPrice)}`,
+    `      E: ${fmtPrice(item.entryPrice)} | PNL: ${fmtPct(item.pnlPct)} / ${fmtSignedUsd(item.pnlUsd)} | ${fmtAge(item.age)}`,
     `      C: ${fmtPrice(item.currentPrice)} | TP: ${fmtPrice(item.takeProfitPrice)} | L: ${fmtPrice(item.liquidationPrice)}`
   ];
 }
@@ -271,7 +273,7 @@ export function buildStrategyStatusTelegramMessage(input) {
   const manualExitLines = buildManualExitLines(input);
 
   return [
-    `${input.emoji} ${input.exchange}: ${input.strategyLabel}`,
+    titleLine(input),
     "📈 Open Positions",
     "",
     ...positionLines,
@@ -294,5 +296,5 @@ export function buildStrategyStatusTelegramMessage(input) {
 }
 
 export function buildNoSignalTelegramMessage(input) {
-  return `${input.emoji} ${input.exchange}: ${input.strategyLabel}\n📈 Open Positions\n\nNo new entry signals this cycle.`;
+  return `${titleLine(input)}\n📈 Open Positions\n\nNo new entry signals this cycle.`;
 }

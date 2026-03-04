@@ -29,6 +29,7 @@ export async function collectEndpoint(params: CollectEndpointParams): Promise<Co
   }
 
   return {
+    sourceExchange: params.exchangeName,
     name: params.endpoint.name,
     method: params.endpoint.method,
     url,

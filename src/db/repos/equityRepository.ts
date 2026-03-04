@@ -29,7 +29,7 @@ export class EquityRepository {
   async insert(snapshot: AccountSnapshotEvent): Promise<void> {
     if (!this.db) return;
 
-    const { error } = await this.db.from("lt_account_snapshots").insert({
+    const { error } = await this.db.from("account_snapshots").insert({
       strategy_name: snapshot.strategyName,
       observed_at: snapshot.observedAt,
       equity_usd: snapshot.equityUsd,
@@ -50,7 +50,7 @@ export class EquityRepository {
     });
 
     if (error) {
-      throw new Error(`Failed to insert lt_account_snapshots: ${error.message}`);
+      throw new Error(`Failed to insert account_snapshots: ${error.message}`);
     }
   }
 
@@ -58,7 +58,7 @@ export class EquityRepository {
     if (!this.db) return null;
 
     const { data, error } = await this.db
-      .from("lt_account_snapshots")
+      .from("account_snapshots")
       .select("observed_at,equity_usd,cash_usd")
       .eq("strategy_name", strategyName)
       .order("observed_at", { ascending: false })
@@ -66,7 +66,7 @@ export class EquityRepository {
       .maybeSingle();
 
     if (error) {
-      throw new Error(`Failed to query latest lt_account_snapshots: ${error.message}`);
+      throw new Error(`Failed to query latest account_snapshots: ${error.message}`);
     }
 
     if (!data) return null;
@@ -82,7 +82,7 @@ export class EquityRepository {
     if (!this.db) return null;
 
     const { data, error } = await this.db
-      .from("lt_account_snapshots")
+      .from("account_snapshots")
       .select("observed_at,equity_usd,cash_usd")
       .eq("strategy_name", strategyName)
       .order("observed_at", { ascending: true })
@@ -90,7 +90,7 @@ export class EquityRepository {
       .maybeSingle();
 
     if (error) {
-      throw new Error(`Failed to query first lt_account_snapshots: ${error.message}`);
+      throw new Error(`Failed to query first account_snapshots: ${error.message}`);
     }
 
     if (!data) return null;
@@ -106,7 +106,7 @@ export class EquityRepository {
     if (!this.db) return null;
 
     const { data, error } = await this.db
-      .from("lt_account_snapshots")
+      .from("account_snapshots")
       .select(
         "observed_at,equity_usd,cash_usd,margin_in_use_usd,open_notional_usd,unrealized_pnl_usd,realized_pnl_usd,winners,losers,liquidations,replaced,entries,exits,open_positions,missed,net_funding_usd"
       )

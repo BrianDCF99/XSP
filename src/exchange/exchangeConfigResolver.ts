@@ -1,22 +1,22 @@
 /**
- * Resolves the active exchange config from runtime configuration.
+ * Resolves fixed signal/execution exchange configs from runtime configuration.
  */
 import { RuntimeConfig } from "../config/schema.js";
 import { ExchangeConfig } from "./types.js";
 
-export function resolveActiveExchange(cfg: RuntimeConfig): ExchangeConfig {
-  const exchangeName = cfg.exchange.active;
-  const rawExchange = cfg.exchange.exchanges[exchangeName];
-
-  if (!rawExchange) {
-    throw new Error(`Exchange '${exchangeName}' not found in config`);
-  }
-
+function mapExchange(rawExchange: RuntimeConfig["exchange"]["signal"]): ExchangeConfig {
   return {
-    name: exchangeName,
+    name: rawExchange.name,
     restBaseUrl: rawExchange.restBaseUrl,
     tickerDeepLinkTemplate: rawExchange.tickerDeepLinkTemplate,
-    futuresEndpoints: rawExchange.futuresEndpoints,
-    archiveEndpoints: rawExchange.archiveEndpoints
+    futuresEndpoints: rawExchange.futuresEndpoints
   };
+}
+
+export function resolveSignalExchange(cfg: RuntimeConfig): ExchangeConfig {
+  return mapExchange(cfg.exchange.signal);
+}
+
+export function resolveExecutionExchange(cfg: RuntimeConfig): ExchangeConfig {
+  return mapExchange(cfg.exchange.execution);
 }

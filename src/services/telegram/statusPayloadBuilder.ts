@@ -9,6 +9,8 @@ import { formatEntryAge } from "../../utils/time.js";
 export interface StrategyStatusPosition {
   tickerDeepLinkTemplate: string;
   symbol: string;
+  bybitEntryPrice: number;
+  bybitCurrentPrice: number;
   entryPrice: number;
   pnlPct: number;
   pnlUsd: number;
@@ -86,16 +88,21 @@ function sortByEntryTime(rows: OpenPositionRecord[]): OpenPositionRecord[] {
 function toPositions(
   openPositions: OpenPositionRecord[],
   priceBySymbol: Map<string, number>,
+  bybitPriceBySymbol: Map<string, number> | undefined,
   tickerDeepLinkTemplate: string,
   nowMs: number
 ): StrategyStatusPosition[] {
   return sortByEntryTime(openPositions).map((position) => {
     const currentPrice = priceBySymbol.get(position.symbol) ?? position.entryPrice;
     const pnlUsd = positionPnlUsd(position, currentPrice);
+    const bybitEntryPrice = position.entryPrice;
+    const bybitCurrentPrice = bybitPriceBySymbol?.get(position.symbol) ?? bybitEntryPrice;
 
     return {
       tickerDeepLinkTemplate,
       symbol: position.symbol,
+      bybitEntryPrice,
+      bybitCurrentPrice,
       entryPrice: position.entryPrice,
       pnlPct: positionPnlPct(position, pnlUsd),
       pnlUsd,
@@ -128,6 +135,7 @@ export function buildStatusPayload(input: {
   openPositions: OpenPositionRecord[];
   latestSnapshot: AccountSnapshotRecord | null;
   priceBySymbol: Map<string, number>;
+  bybitPriceBySymbol?: Map<string, number>;
   tickerDeepLinkTemplate: string;
   liveExchangeAccount?: ExchangeAccountState | null;
   nowMs?: number;
@@ -140,7 +148,13 @@ export function buildStatusPayload(input: {
     ? Number(input.startingEquityUsd)
     : exchangeEquity ?? DEFAULT_STARTING_EQUITY_USD;
 
-  const positions = toPositions(input.openPositions, input.priceBySymbol, input.tickerDeepLinkTemplate, nowMs);
+  const positions = toPositions(
+    input.openPositions,
+    input.priceBySymbol,
+    input.bybitPriceBySymbol,
+    input.tickerDeepLinkTemplate,
+    nowMs
+  );
 
   const unrealizedDerived = unrealizedPnlUsd(input.openPositions, input.priceBySymbol);
   const marginDerived = input.openPositions.reduce((sum, p) => sum + p.marginUsd, 0);

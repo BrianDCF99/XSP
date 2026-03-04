@@ -1,16 +1,18 @@
 /**
- * Coordinates enabled futures endpoint collection for the active exchange.
+ * Collects futures data from fixed dual sources:
+ * - Signal source (Bybit)
+ * - Execution source (MEXC)
  */
 import { RuntimeConfig } from "../config/schema.js";
 import { Logger } from "../utils/logger.js";
 import { nowIso } from "../utils/time.js";
 import { collectEndpoint } from "./endpointCollector.js";
 import { buildFanoutEndpoint } from "./fanoutEndpointBuilder.js";
-import { resolveActiveExchange } from "./exchangeConfigResolver.js";
+import { resolveExecutionExchange, resolveSignalExchange } from "./exchangeConfigResolver.js";
 import { HttpJsonClient } from "./httpJsonClient.js";
 import { runWithLimit } from "./parallelLimiter.js";
 import { extractSymbolUniverse } from "./symbolUniverseExtractor.js";
-import { ExchangeEndpointConfig, FuturesSnapshot } from "./types.js";
+import { ExchangeConfig, ExchangeEndpointConfig, FuturesSnapshot } from "./types.js";
 
 export class ExchangeCollector {
   private readonly client: HttpJsonClient;
@@ -23,35 +25,54 @@ export class ExchangeCollector {
   }
 
   get tickerDeepLinkTemplate(): string {
-    return resolveActiveExchange(this.cfg).tickerDeepLinkTemplate;
+    return resolveExecutionExchange(this.cfg).tickerDeepLinkTemplate;
   }
 
   get exchangeName(): string {
-    return this.cfg.exchange.active;
+    return resolveExecutionExchange(this.cfg).name;
   }
 
   async collectFuturesData(): Promise<FuturesSnapshot> {
-    const exchange = resolveActiveExchange(this.cfg);
-    const enabledEndpoints = exchange.futuresEndpoints.filter((endpoint) => endpoint.enabled);
-    const baseEndpoints = enabledEndpoints.filter((endpoint) => !endpoint.symbolFanout);
-    const fanoutTemplates = enabledEndpoints.filter((endpoint) => endpoint.symbolFanout);
+    const execution = resolveExecutionExchange(this.cfg);
+    const signal = resolveSignalExchange(this.cfg);
 
-    const baseResults = await this.collectMany(exchange.name, exchange.restBaseUrl, baseEndpoints);
-    const symbols = extractSymbolUniverse(baseResults);
-    const fanoutEndpoints = this.materializeFanoutEndpoints(fanoutTemplates, symbols);
-    const fanoutResults = await this.collectMany(exchange.name, exchange.restBaseUrl, fanoutEndpoints);
+    const [executionEndpoints, signalEndpoints] = await Promise.all([
+      this.collectSource(execution),
+      this.collectSource(signal)
+    ]);
 
     return {
-      exchange: exchange.name,
+      // keep legacy top-level `exchange` as execution source for run labels and DB compatibility.
+      exchange: execution.name,
+      executionExchange: execution.name,
+      signalExchange: signal.name,
       collectedAt: nowIso(),
-      endpoints: [...baseResults, ...fanoutResults]
+      endpoints: [...executionEndpoints, ...signalEndpoints]
     };
   }
 
-  private materializeFanoutEndpoints(templates: ExchangeEndpointConfig[], symbols: string[]): ExchangeEndpointConfig[] {
+  private async collectSource(source: ExchangeConfig): Promise<FuturesSnapshot["endpoints"]> {
+    const enabledEndpoints = source.futuresEndpoints.filter((endpoint) => endpoint.enabled);
+    const baseEndpoints = enabledEndpoints.filter((endpoint) => !endpoint.symbolFanout);
+    const fanoutTemplates = enabledEndpoints.filter((endpoint) => endpoint.symbolFanout);
+
+    const baseResults = await this.collectMany(source.name, source.restBaseUrl, baseEndpoints);
+    const symbols = extractSymbolUniverse(baseResults);
+    const fanoutEndpoints = this.materializeFanoutEndpoints(source.name, fanoutTemplates, symbols);
+    const fanoutResults = await this.collectMany(source.name, source.restBaseUrl, fanoutEndpoints);
+
+    return [...baseResults, ...fanoutResults];
+  }
+
+  private materializeFanoutEndpoints(
+    sourceName: string,
+    templates: ExchangeEndpointConfig[],
+    symbols: string[]
+  ): ExchangeEndpointConfig[] {
     if (templates.length === 0) return [];
     if (symbols.length === 0) {
       this.logger.warn("symbol fanout endpoints skipped because symbol universe is empty", {
+        source: sourceName,
         endpointCount: templates.length
       });
       return [];
@@ -65,6 +86,7 @@ export class ExchangeCollector {
     }
 
     this.logger.info("symbol fanout materialized", {
+      source: sourceName,
       symbols: symbols.length,
       templates: templates.length,
       expandedEndpoints: materialized.length

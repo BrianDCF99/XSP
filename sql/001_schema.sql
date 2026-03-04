@@ -4,73 +4,73 @@ create extension if not exists pgcrypto;
 -- Enums
 do $$
 begin
-  if not exists (select 1 from pg_type where typname = 'lt_run_status') then
-    create type lt_run_status as enum ('RUNNING', 'SUCCESS', 'FAILED');
+  if not exists (select 1 from pg_type where typname = 'run_status') then
+    create type run_status as enum ('RUNNING', 'SUCCESS', 'FAILED');
   end if;
 end $$;
 
 do $$
 begin
-  if not exists (select 1 from pg_type where typname = 'lt_strategy_run_status') then
-    create type lt_strategy_run_status as enum ('RUNNING', 'SUCCESS', 'FAILED');
+  if not exists (select 1 from pg_type where typname = 'strategy_run_status') then
+    create type strategy_run_status as enum ('RUNNING', 'SUCCESS', 'FAILED');
   end if;
 end $$;
 
 do $$
 begin
-  if not exists (select 1 from pg_type where typname = 'lt_side') then
-    create type lt_side as enum ('LONG', 'SHORT');
+  if not exists (select 1 from pg_type where typname = 'side') then
+    create type side as enum ('LONG', 'SHORT');
   end if;
 end $$;
 
 do $$
 begin
-  if not exists (select 1 from pg_type where typname = 'lt_position_status') then
-    create type lt_position_status as enum ('OPEN', 'CLOSED', 'LIQUIDATED', 'REPLACED');
+  if not exists (select 1 from pg_type where typname = 'position_status') then
+    create type position_status as enum ('OPEN', 'CLOSED', 'LIQUIDATED', 'REPLACED');
   end if;
 end $$;
 
 do $$
 begin
-  if not exists (select 1 from pg_type where typname = 'lt_position_event_type') then
-    create type lt_position_event_type as enum ('ENTRY', 'EXIT', 'REPLACE', 'LIQUIDATION', 'FUNDING');
+  if not exists (select 1 from pg_type where typname = 'position_event_type') then
+    create type position_event_type as enum ('ENTRY', 'EXIT', 'REPLACE', 'LIQUIDATION', 'FUNDING');
   end if;
 end $$;
 
 -- Top-level cycle runs
-create table if not exists lt_runs (
+create table if not exists runs (
   id uuid primary key default gen_random_uuid(),
   exchange text not null,
-  status lt_run_status not null,
+  status run_status not null,
   started_at timestamptz not null default now(),
   finished_at timestamptz,
   error_message text
 );
 
-create index if not exists idx_lt_runs_started_at on lt_runs (started_at desc);
-create index if not exists idx_lt_runs_exchange_status on lt_runs (exchange, status);
+create index if not exists idx_runs_started_at on runs (started_at desc);
+create index if not exists idx_runs_exchange_status on runs (exchange, status);
 
 -- Market snapshot payloads are archived locally in NDJSON only (not persisted in DB).
 
 -- Strategy run per cycle
-create table if not exists lt_strategy_runs (
+create table if not exists strategy_runs (
   id uuid primary key default gen_random_uuid(),
-  run_id uuid not null references lt_runs(id) on delete cascade,
+  run_id uuid not null references runs(id) on delete cascade,
   strategy_name text not null,
-  status lt_strategy_run_status not null,
+  status strategy_run_status not null,
   started_at timestamptz not null default now(),
   finished_at timestamptz,
   error_message text
 );
 
-create index if not exists idx_lt_strategy_runs_run_id on lt_strategy_runs (run_id);
-create index if not exists idx_lt_strategy_runs_strategy_time on lt_strategy_runs (strategy_name, started_at desc);
+create index if not exists idx_strategy_runs_run_id on strategy_runs (run_id);
+create index if not exists idx_strategy_runs_strategy_time on strategy_runs (strategy_name, started_at desc);
 
 -- Outbound messages
-create table if not exists lt_strategy_messages (
+create table if not exists strategy_messages (
   id bigserial primary key,
-  cycle_run_id uuid not null references lt_runs(id) on delete cascade,
-  strategy_run_id uuid not null references lt_strategy_runs(id) on delete cascade,
+  cycle_run_id uuid not null references runs(id) on delete cascade,
+  strategy_run_id uuid not null references strategy_runs(id) on delete cascade,
   strategy_name text not null,
   message_type text not null,
   symbol text,
@@ -79,17 +79,17 @@ create table if not exists lt_strategy_messages (
   created_at timestamptz not null default now()
 );
 
-alter table lt_strategy_messages
+alter table strategy_messages
   add column if not exists manual_alert_id uuid;
 
-create index if not exists idx_lt_strategy_messages_strategy_time on lt_strategy_messages (strategy_name, created_at desc);
-create index if not exists idx_lt_strategy_messages_cycle on lt_strategy_messages (cycle_run_id);
-create index if not exists idx_lt_strategy_messages_manual_alert_id on lt_strategy_messages (manual_alert_id);
+create index if not exists idx_strategy_messages_strategy_time on strategy_messages (strategy_name, created_at desc);
+create index if not exists idx_strategy_messages_cycle on strategy_messages (cycle_run_id);
+create index if not exists idx_strategy_messages_manual_alert_id on strategy_messages (manual_alert_id);
 
 -- Manual action alerts (entry/exit/replacement available messages with button actions)
-create table if not exists lt_manual_alerts (
+create table if not exists manual_alerts (
   id uuid primary key default gen_random_uuid(),
-  cycle_run_id uuid references lt_runs(id) on delete set null,
+  cycle_run_id uuid references runs(id) on delete set null,
   strategy_name text not null,
   kind text not null,
   primary_symbol text not null,
@@ -107,12 +107,12 @@ create table if not exists lt_manual_alerts (
   confirmed_at timestamptz
 );
 
-create index if not exists idx_lt_manual_alerts_strategy_time on lt_manual_alerts (strategy_name, created_at desc);
-create index if not exists idx_lt_manual_alerts_status_time on lt_manual_alerts (status, created_at desc);
-create index if not exists idx_lt_manual_alerts_symbol_status on lt_manual_alerts (primary_symbol, status);
+create index if not exists idx_manual_alerts_strategy_time on manual_alerts (strategy_name, created_at desc);
+create index if not exists idx_manual_alerts_status_time on manual_alerts (status, created_at desc);
+create index if not exists idx_manual_alerts_symbol_status on manual_alerts (primary_symbol, status);
 
 -- Coins each strategy tracks
-create table if not exists lt_tracked_symbols (
+create table if not exists tracked_symbols (
   strategy_name text not null,
   symbol text not null,
   first_seen_at timestamptz not null default now(),
@@ -121,13 +121,13 @@ create table if not exists lt_tracked_symbols (
 );
 
 -- Position lifecycle (state table)
-create table if not exists lt_positions (
+create table if not exists positions (
   id uuid primary key,
   strategy_name text not null,
   symbol text not null,
   exchange text not null,
-  side lt_side not null,
-  status lt_position_status not null,
+  side side not null,
+  status position_status not null,
   entry_time timestamptz not null,
   entry_price numeric(30, 12) not null,
   qty numeric(30, 12),
@@ -149,31 +149,31 @@ create table if not exists lt_positions (
   updated_at timestamptz not null default now()
 );
 
-create index if not exists idx_lt_positions_strategy_status on lt_positions (strategy_name, status);
-create index if not exists idx_lt_positions_symbol_status on lt_positions (symbol, status);
-create index if not exists idx_lt_positions_entry_time on lt_positions (entry_time desc);
-create unique index if not exists idx_lt_positions_open_unique
-  on lt_positions (strategy_name, symbol)
+create index if not exists idx_positions_strategy_status on positions (strategy_name, status);
+create index if not exists idx_positions_symbol_status on positions (symbol, status);
+create index if not exists idx_positions_entry_time on positions (entry_time desc);
+create unique index if not exists idx_positions_open_unique
+  on positions (strategy_name, symbol)
   where status = 'OPEN';
 
-alter table lt_positions
+alter table positions
   add column if not exists take_profit_price numeric(30, 12);
 
-alter table lt_positions
+alter table positions
   add column if not exists entry_sell_ratio numeric(18, 8);
 
-alter table lt_positions
+alter table positions
   add column if not exists entry_slippage_bps numeric(18, 8);
 
 -- Immutable event ledger
-create table if not exists lt_position_events (
+create table if not exists position_events (
   id bigserial primary key,
-  cycle_run_id uuid not null references lt_runs(id) on delete cascade,
+  cycle_run_id uuid not null references runs(id) on delete cascade,
   strategy_name text not null,
   symbol text not null,
   exchange text not null,
-  side lt_side not null,
-  event_type lt_position_event_type not null,
+  side side not null,
+  event_type position_event_type not null,
   event_time timestamptz not null,
   price numeric(30, 12) not null,
   qty numeric(30, 12),
@@ -192,18 +192,18 @@ create table if not exists lt_position_events (
   created_at timestamptz not null default now()
 );
 
-create index if not exists idx_lt_position_events_strategy_time on lt_position_events (strategy_name, event_time desc);
-create index if not exists idx_lt_position_events_symbol_time on lt_position_events (symbol, event_time desc);
-create index if not exists idx_lt_position_events_event_type on lt_position_events (event_type, event_time desc);
+create index if not exists idx_position_events_strategy_time on position_events (strategy_name, event_time desc);
+create index if not exists idx_position_events_symbol_time on position_events (symbol, event_time desc);
+create index if not exists idx_position_events_event_type on position_events (event_type, event_time desc);
 
-alter table lt_position_events
+alter table position_events
   add column if not exists take_profit_price numeric(30, 12);
 
-alter table lt_position_events
+alter table position_events
   add column if not exists entry_sell_ratio numeric(18, 8);
 
 -- Strategy-level account snapshots
-create table if not exists lt_account_snapshots (
+create table if not exists account_snapshots (
   id bigserial primary key,
   strategy_name text not null,
   observed_at timestamptz not null,
@@ -225,10 +225,10 @@ create table if not exists lt_account_snapshots (
   created_at timestamptz not null default now()
 );
 
-create index if not exists idx_lt_account_snapshots_strategy_time on lt_account_snapshots (strategy_name, observed_at desc);
+create index if not exists idx_account_snapshots_strategy_time on account_snapshots (strategy_name, observed_at desc);
 
--- Keep lt_positions.updated_at fresh
-create or replace function lt_touch_updated_at()
+-- Keep positions.updated_at fresh
+create or replace function touch_updated_at()
 returns trigger
 language plpgsql
 as $$
@@ -238,12 +238,12 @@ begin
 end;
 $$;
 
-drop trigger if exists trg_lt_positions_touch_updated_at on lt_positions;
-create trigger trg_lt_positions_touch_updated_at
-before update on lt_positions
-for each row execute function lt_touch_updated_at();
+drop trigger if exists trg_positions_touch_updated_at on positions;
+create trigger trg_positions_touch_updated_at
+before update on positions
+for each row execute function touch_updated_at();
 
-drop trigger if exists trg_lt_manual_alerts_touch_updated_at on lt_manual_alerts;
-create trigger trg_lt_manual_alerts_touch_updated_at
-before update on lt_manual_alerts
-for each row execute function lt_touch_updated_at();
+drop trigger if exists trg_manual_alerts_touch_updated_at on manual_alerts;
+create trigger trg_manual_alerts_touch_updated_at
+before update on manual_alerts
+for each row execute function touch_updated_at();

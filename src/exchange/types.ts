@@ -18,10 +18,10 @@ export interface ExchangeConfig {
   restBaseUrl: string;
   tickerDeepLinkTemplate: string;
   futuresEndpoints: ExchangeEndpointConfig[];
-  archiveEndpoints: ExchangeEndpointConfig[];
 }
 
 export interface CollectedEndpoint {
+  sourceExchange: string;
   name: string;
   method: "GET" | "POST";
   url: string;
@@ -36,6 +36,8 @@ export interface CollectedEndpoint {
 
 export interface FuturesSnapshot {
   exchange: string;
+  signalExchange: string;
+  executionExchange: string;
   collectedAt: string;
   endpoints: CollectedEndpoint[];
 }

@@ -7,6 +7,7 @@ import { extractPriceMap } from "../../core/boot/priceMapExtractor.js";
 import { Repositories } from "../../db/repos/index.js";
 import { ExchangeAccountState, extractExchangeAccountState } from "../../exchange/accountStateExtractor.js";
 import { ExchangeCollector } from "../../exchange/exchangeCollector.js";
+import { extractBybitPriceMapByMexcSymbol } from "../../exchange/signalMarketExtractor.js";
 import { TelegramClient } from "../../notifications/telegramClient.js";
 import { TelegramCallbackQuery, TelegramUpdate } from "../../notifications/telegramTypes.js";
 import { ManualActionProcessor } from "../manual/manualActionProcessor.js";
@@ -394,10 +395,12 @@ export class TelegramCommandService {
     }
 
     const startingEquityUsd = firstSnapshot?.equityUsd ?? liveExchangeAccount?.equityUsd;
+    const bybitPriceBySymbol = extractBybitPriceMapByMexcSymbol(snapshot);
     const statusInput = {
       openPositions,
       latestSnapshot,
       priceBySymbol: extractPriceMap(snapshot),
+      bybitPriceBySymbol,
       tickerDeepLinkTemplate: this.collector.tickerDeepLinkTemplate,
       liveExchangeAccount
     };

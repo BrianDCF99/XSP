@@ -3,9 +3,15 @@
  */
 import { RuntimeConfig } from "./schema.js";
 
-export function assertExchangeExists(activeExchange: string, exchanges: Record<string, unknown>): void {
-  if (Object.prototype.hasOwnProperty.call(exchanges, activeExchange)) return;
-  throw new Error(`Active exchange '${activeExchange}' is missing in exchange.exchanges`);
+export function assertExchangePair(cfg: RuntimeConfig): void {
+  const signal = cfg.exchange.signal.name.toLowerCase();
+  const execution = cfg.exchange.execution.name.toLowerCase();
+
+  if (signal !== "bybit" || execution !== "mexc") {
+    throw new Error(
+      `Invalid exchange pair: signal='${cfg.exchange.signal.name}', execution='${cfg.exchange.execution.name}'. Expected signal=bybit and execution=mexc.`
+    );
+  }
 }
 
 export function assertStrategyFoldersConfigured(activeStrategies: string[]): void {
@@ -22,7 +28,7 @@ export function assertRequiredSecrets(cfg: RuntimeConfig): void {
     throw new Error("Telegram is enabled but TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID are missing in .env");
   }
 
-  if (cfg.manualExecution.enabled && cfg.exchange.active.toLowerCase() === "mexc") {
+  if (cfg.manualExecution.enabled && cfg.exchange.execution.name.toLowerCase() === "mexc") {
     if (!cfg.env.mexcApiKey || !cfg.env.mexcApiSecret) {
       throw new Error("Manual execution is enabled for MEXC but MEXC_API_KEY / MEXC_API_SECRET are missing in .env");
     }

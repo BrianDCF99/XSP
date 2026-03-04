@@ -1,6 +1,6 @@
 -- Analytics views and convenience function
 
-create or replace view lt_strategy_win_rate as
+create or replace view strategy_win_rate as
 select
   strategy_name,
   count(*) filter (where status in ('CLOSED', 'REPLACED', 'LIQUIDATED')) as closed_positions,
@@ -16,10 +16,10 @@ select
       4
     )
   end as win_rate_pct
-from lt_positions
+from positions
 group by strategy_name;
 
-create or replace view lt_strategy_live_stats as
+create or replace view strategy_live_stats as
 select
   p.strategy_name,
   count(*) filter (where p.status = 'OPEN') as open_positions,
@@ -29,10 +29,10 @@ select
   coalesce(sum(case when p.status in ('CLOSED', 'REPLACED', 'LIQUIDATED') then p.funding_usd else 0 end), 0) as net_funding_usd,
   count(*) filter (where p.status = 'LIQUIDATED') as liquidations,
   count(*) filter (where p.status = 'REPLACED') as replaced
-from lt_positions p
+from positions p
 group by p.strategy_name;
 
-create or replace view lt_recent_liquidations as
+create or replace view recent_liquidations as
 select
   strategy_name,
   symbol,
@@ -42,11 +42,11 @@ select
   pnl_pct,
   pnl_usd,
   reason
-from lt_position_events
+from position_events
 where event_type = 'LIQUIDATION'
 order by event_time desc;
 
-create or replace view lt_recent_funding as
+create or replace view recent_funding as
 select
   strategy_name,
   symbol,
@@ -54,11 +54,11 @@ select
   funding_usd,
   pnl_usd,
   reason
-from lt_position_events
+from position_events
 where event_type = 'FUNDING'
 order by event_time desc;
 
-create or replace function lt_strategy_summary(p_strategy_name text)
+create or replace function strategy_summary(p_strategy_name text)
 returns table (
   strategy_name text,
   open_positions bigint,
@@ -88,8 +88,8 @@ as $$
     wr.win_rate_pct,
     live.liquidations,
     live.replaced
-  from lt_strategy_live_stats live
-  join lt_strategy_win_rate wr
+  from strategy_live_stats live
+  join strategy_win_rate wr
     on wr.strategy_name = live.strategy_name
   where live.strategy_name = p_strategy_name;
 $$;

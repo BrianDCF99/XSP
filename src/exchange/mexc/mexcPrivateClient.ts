@@ -171,13 +171,13 @@ export class MexcPrivateClient {
   private readonly recvWindowMs: number;
 
   constructor(private readonly cfg: RuntimeConfig) {
-    const activeExchange = cfg.exchange.exchanges[cfg.exchange.active];
-    if (!activeExchange) {
-      throw new Error(`Active exchange '${cfg.exchange.active}' is not configured`);
+    const execution = cfg.exchange.execution;
+    if (execution.name.toLowerCase() !== "mexc") {
+      throw new Error(`MEXC private client requires execution exchange 'mexc' (received '${execution.name}')`);
     }
 
-    const privateApi = activeExchange.privateApi;
-    this.baseUrl = (privateApi?.baseUrl ?? activeExchange.restBaseUrl).replace(/\/$/, "");
+    const privateApi = execution.privateApi;
+    this.baseUrl = (privateApi?.baseUrl ?? execution.restBaseUrl).replace(/\/$/, "");
     this.recvWindowMs = privateApi?.recvWindowMs ?? 10000;
   }
 

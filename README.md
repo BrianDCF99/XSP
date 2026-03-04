@@ -9,12 +9,10 @@ The root `config.yaml` intentionally contains no strategy rules. It only contain
 
 ## Key Guarantees
 
-- Exchange + endpoint switching is YAML-only (`exchange.exchanges.*`)
+- Fixed dual-source model: Bybit for signals, MEXC for execution/account state
 - Strategy activation is YAML-only (`strategies.active`)
 - Strategy execution is offloaded to worker threads
 - Main strategy loop never writes market payloads to local files
-- Archive collection runs in a separate worker thread on its own schedule
-- Archive payloads are written per symbol in local NDJSON files with persistent dedupe cursors
 - Market snapshots are local-only (never persisted to Supabase)
 - Strategy events/statistics are persisted to Supabase tables/views
 - Entry/exit actions are manual-trade aware: bot alerts + Telegram buttons + exchange reconciliation (no API order placement)
@@ -75,18 +73,11 @@ Controlled by `scheduler.cadence`:
 
 ## Futures Collector
 
-- Main strategy collection uses `exchange.exchanges.<name>.futuresEndpoints`.
-- This path is read-only (used for strategy/boot/status logic) and does not write local market archives.
-- For MEXC, open-interest is collected from `ticker` payloads (MEXC public `open_interest` endpoint is not available).
-
-## Data Collector Thread
-
-- Background archive collection uses `exchange.exchanges.<name>.archiveEndpoints`.
-- Runs on `dataCollector.cadence` (default hourly at `:15` seconds) with independent throttle (`dataCollector.maxParallelRequests`).
-- Endpoints with `minuteBackfill: true` fetch the last `dataCollector.lookbackMinutes` window using `start/end`.
-- Records are written per symbol under `dataCollector.outputDir` as NDJSON.
-- Dedupe state is persisted in `dataCollector.stateFile` keyed by `endpoint + symbol`, so overlapping windows do not duplicate rows.
-- Endpoints that return non-symbol payloads are archived under `__GLOBAL__.ndjson` (still deduped per endpoint+minute).
+- Main strategy collection merges:
+  - `exchange.signal.futuresEndpoints` (Bybit signal metrics)
+  - `exchange.execution.futuresEndpoints` (MEXC execution prices/contracts)
+- Strategy/refresh/status logic reads from this merged snapshot and applies source-aware parsing.
+- This path is read-only and does not write local market archives.
 
 ## Boot Recovery
 
@@ -126,6 +117,19 @@ Enabled when `telegram.enabled: true`.
 - `/<strategy_folder_name>`
 - `/refresh` (reconcile recent manual actions against exchange history)
 
+## Telegram Transport Hardening
+
+Telegram network handling is config-driven and retried automatically:
+
+- `telegram.apiBaseUrl` (default `https://api.telegram.org`)
+- `telegram.requestTimeoutMs` (per request timeout)
+- `telegram.maxRetries` (network + 5xx/429 retries)
+- `telegram.retryBaseDelayMs` + `telegram.retryMaxDelayMs` (exponential backoff window)
+- `telegram.getUpdatesLongPollSeconds` (Telegram long-poll timeout; `0` keeps short-poll behavior)
+- `telegram.preferIpv4` (forces process DNS resolution to `ipv4first`)
+
+Security note: Telegram bot token is redacted in runtime request-error logs.
+
 ## Manual Action Flow
 
 - Strategy sends `Entry Available`, `Exit Available`, `Replacement Available` messages with inline buttons.
@@ -143,8 +147,8 @@ Enabled when `telegram.enabled: true`.
 
 MEXC transport values are config-driven in `config.yaml`:
 
-- `exchange.exchanges.mexc.privateApi.baseUrl`
-- `exchange.exchanges.mexc.privateApi.recvWindowMs`
+- `exchange.execution.privateApi.baseUrl`
+- `exchange.execution.privateApi.recvWindowMs`
 
 Example (default strategy):
 

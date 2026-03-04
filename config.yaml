@@ -11,161 +11,55 @@ scheduler:
   immediateRunOnBoot: true
 
 exchange:
-  active: "mexc"
   requestTimeoutMs: 12000
   maxParallelRequests: 6
-  exchanges:
-    mexc:
-      restBaseUrl: "https://api.mexc.com"
-      privateApi:
-        baseUrl: "https://api.mexc.com"
-        recvWindowMs: 10000
-      tickerDeepLinkTemplate: "https://www.mexc.com/futures/{symbol}"
-      futuresEndpoints:
-        - name: "contract_detail"
-          method: "GET"
-          path: "/api/v1/contract/detail"
-          enabled: true
-          tags: ["futures", "metadata", "contracts"]
-        - name: "ticker"
-          method: "GET"
-          path: "/api/v1/contract/ticker"
-          enabled: true
-          # MEXC currently exposes open interest in ticker payloads.
-          tags: ["futures", "price", "liquidity", "open_interest"]
-      archiveEndpoints:
-        - name: "support_currencies"
-          method: "GET"
-          path: "/api/v1/contract/support_currencies"
-          enabled: true
-          tags: ["futures", "metadata", "currencies"]
-        - name: "risk_reverse"
-          method: "GET"
-          path: "/api/v1/contract/risk_reverse"
-          enabled: true
-          tags: ["futures", "liquidity", "risk"]
-        - name: "contract_detail"
-          method: "GET"
-          path: "/api/v1/contract/detail"
-          enabled: true
-          tags: ["futures", "metadata", "contracts"]
-        - name: "ticker"
-          method: "GET"
-          path: "/api/v1/contract/ticker"
-          enabled: true
-          # MEXC currently exposes open interest in ticker payloads.
-          tags: ["futures", "price", "liquidity", "open_interest"]
-        - name: "depth"
-          method: "GET"
-          path: "/api/v1/contract/depth/{symbol}"
-          symbolFanout: true
-          pathParams:
-            symbol: "{symbol}"
-          query:
-            limit: "50"
-          enabled: true
-          tags: ["futures", "orderbook", "liquidity"]
-        - name: "depth_commits"
-          method: "GET"
-          path: "/api/v1/contract/depth_commits/{symbol}/{limit}"
-          symbolFanout: true
-          pathParams:
-            symbol: "{symbol}"
-            limit: "20"
-          enabled: true
-          tags: ["futures", "orderbook", "orderflow", "liquidity"]
-        - name: "deals"
-          method: "GET"
-          path: "/api/v1/contract/deals/{symbol}"
-          symbolFanout: true
-          pathParams:
-            symbol: "{symbol}"
-          enabled: true
-          tags: ["futures", "trades", "liquidity"]
-        - name: "index_price"
-          method: "GET"
-          path: "/api/v1/contract/index_price/{symbol}"
-          symbolFanout: true
-          pathParams:
-            symbol: "{symbol}"
-          enabled: true
-          tags: ["futures", "price", "index"]
-        - name: "fair_price"
-          method: "GET"
-          path: "/api/v1/contract/fair_price/{symbol}"
-          symbolFanout: true
-          pathParams:
-            symbol: "{symbol}"
-          enabled: true
-          tags: ["futures", "price", "fair"]
-        - name: "funding_rate"
-          method: "GET"
-          path: "/api/v1/contract/funding_rate/{symbol}"
-          symbolFanout: true
-          pathParams:
-            symbol: "{symbol}"
-          enabled: true
-          tags: ["futures", "funding"]
-        - name: "kline"
-          method: "GET"
-          path: "/api/v1/contract/kline/{symbol}"
-          symbolFanout: true
-          minuteBackfill: true
-          pathParams:
-            symbol: "{symbol}"
-          query:
-            interval: "Min1"
-          enabled: true
-          tags: ["futures", "candles", "price"]
-        - name: "kline_index_price"
-          method: "GET"
-          path: "/api/v1/contract/kline/index_price/{symbol}"
-          symbolFanout: true
-          minuteBackfill: true
-          pathParams:
-            symbol: "{symbol}"
-          query:
-            interval: "Min1"
-          enabled: true
-          tags: ["futures", "candles", "index"]
-        - name: "kline_fair_price"
-          method: "GET"
-          path: "/api/v1/contract/kline/fair_price/{symbol}"
-          symbolFanout: true
-          minuteBackfill: true
-          pathParams:
-            symbol: "{symbol}"
-          query:
-            interval: "Min1"
-          enabled: true
-          tags: ["futures", "candles", "fair"]
 
-    bybit:
-      restBaseUrl: "https://api.bybit.com"
-      tickerDeepLinkTemplate: "https://www.bybit.com/trade/usdt/{symbol}"
-      futuresEndpoints:
-        - name: "tickers"
-          method: "GET"
-          path: "/v5/market/tickers"
-          query:
-            category: "linear"
-          enabled: true
-          tags: ["futures", "price", "liquidity"]
-      archiveEndpoints:
-        - name: "instruments_info"
-          method: "GET"
-          path: "/v5/market/instruments-info"
-          query:
-            category: "linear"
-          enabled: true
-          tags: ["futures", "metadata", "contracts"]
-        - name: "tickers"
-          method: "GET"
-          path: "/v5/market/tickers"
-          query:
-            category: "linear"
-          enabled: true
-          tags: ["futures", "price", "liquidity"]
+  # Fixed runtime model:
+  # - Signal source: Bybit (sell-ratio/volume conditions)
+  # - Execution source: MEXC (manual fills, account source-of-truth, price for PNL/TP/Liq)
+  signal:
+    name: "bybit"
+    restBaseUrl: "https://api.bybit.com"
+    tickerDeepLinkTemplate: "https://www.bybit.com/trade/usdt/{symbol}"
+    futuresEndpoints:
+      - name: "tickers"
+        method: "GET"
+        path: "/v5/market/tickers"
+        query:
+          category: "linear"
+        enabled: true
+        tags: ["futures", "price", "liquidity"]
+
+      - name: "account_ratio"
+        method: "GET"
+        path: "/v5/market/account-ratio"
+        symbolFanout: true
+        query:
+          category: "linear"
+          period: "5min"
+          limit: "1"
+        enabled: true
+        tags: ["futures", "sentiment", "sell_ratio", "buy_ratio"]
+
+  execution:
+    name: "mexc"
+    restBaseUrl: "https://api.mexc.com"
+    privateApi:
+      baseUrl: "https://api.mexc.com"
+      recvWindowMs: 10000
+    tickerDeepLinkTemplate: "https://www.mexc.com/futures/{symbol}"
+    futuresEndpoints:
+      - name: "contract_detail"
+        method: "GET"
+        path: "/api/v1/contract/detail"
+        enabled: true
+        tags: ["futures", "metadata", "contracts"]
+
+      - name: "ticker"
+        method: "GET"
+        path: "/api/v1/contract/ticker"
+        enabled: true
+        tags: ["futures", "price", "liquidity", "open_interest"]
 
 strategies:
   basePath: "./strategies"
@@ -177,25 +71,19 @@ telegram:
   parseMode: "HTML"
   disableWebPagePreview: true
   commandPollMs: 4000
+  apiBaseUrl: "https://api.telegram.org"
+  requestTimeoutMs: 15000
+  maxRetries: 4
+  retryBaseDelayMs: 500
+  retryMaxDelayMs: 5000
+  getUpdatesLongPollSeconds: 0
+  preferIpv4: true
 
 manualExecution:
   enabled: true
   pendingPollMs: 5000
   autoRefreshMinutes: 60
   reconcileLookbackMinutes: 60
-
-dataCollector:
-  enabled: true
-  immediateRunOnBoot: true
-  cadence:
-    unit: "hour"
-    every: 1
-    offsetSeconds: 15
-  lookbackMinutes: 60
-  maxParallelRequests: 3
-  workerTimeoutMs: 3300000
-  outputDir: "./data/futures_by_symbol"
-  stateFile: "./data/futures_by_symbol/_state/cursors.json"
 
 supabase:
   enabled: true

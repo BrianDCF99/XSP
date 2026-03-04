@@ -6,11 +6,11 @@ import { ManualAlertRecord } from "../../db/repos/manualAlertRepository.js";
 import { Repositories } from "../../db/repos/index.js";
 import { ExchangeAccountState } from "../../exchange/accountStateExtractor.js";
 import { ExchangeCollector } from "../../exchange/exchangeCollector.js";
+import { extractBybitSignalRows } from "../../exchange/signalMarketExtractor.js";
 import { MexcOpenPosition, MexcPrivateClient } from "../../exchange/mexc/mexcPrivateClient.js";
 import { TelegramClient } from "../../notifications/telegramClient.js";
 import { ManualAlertButtonAction, PositionEvent, StrategyMessage } from "../../strategies/types.js";
 import { Logger } from "../../utils/logger.js";
-import { extractMarketTickers } from "./marketTickerExtractor.js";
 import {
   AccountState,
   StrategyTelegramModule,
@@ -107,7 +107,8 @@ export class ManualAlertActionResolver {
   async refreshOneAlert(alert: ManualAlertRecord): Promise<void> {
     const module = await this.deps.getModule(alert.strategyName);
     const snapshot = await this.deps.collector.collectFuturesData();
-    const tickers = extractMarketTickers(snapshot);
+    const signalSummary = extractBybitSignalRows(snapshot);
+    const signalBySymbol = new Map(signalSummary.rows.map((row) => [normalizeSymbol(row.mexcSymbol), row]));
     const openPositions = await this.deps.repos.trades.getOpenPositionsByStrategy(alert.strategyName);
     const openBySymbol = new Map(openPositions.map((position) => [normalizeSymbol(position.symbol), position]));
     const payload = alert.payload;
@@ -116,7 +117,11 @@ export class ManualAlertActionResolver {
       const account = await this.currentAccountState();
       const marginToPut = calcMarginToPutRounded(account.cashUsd);
       const symbol = normalizeSymbol(asString(payload.symbol, alert.primarySymbol));
-      const row = tickers.get(symbol);
+      const row = signalBySymbol.get(symbol);
+      const bybitPriceAtAlert = asNumber(row?.bybitPrice, asNumber(payload.bybitPriceAtAlert, 0));
+      const mexcPriceAtAlert = asNumber(row?.mexcPrice, asNumber(payload.priceAtAlert, 0));
+      const sellRatioNow = asNumber(row?.sellRatio, asNumber(payload.sellRatioNow, 0));
+      const hourVolumeNow = asNumber(row?.hourVolume, asNumber(payload.hourVolumeNow, 0));
       const refreshedMessage: StrategyMessage = {
         type: "ENTRY",
         symbol,
@@ -127,14 +132,12 @@ export class ManualAlertActionResolver {
           strategyLabel: resolveStrategyLabel(alert.strategyName, module),
           tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
           symbol,
-          priceAtAlert: asNumber(row?.lastPrice, asNumber(payload.priceAtAlert, 0)),
+          bybitPriceAtAlert,
+          mexcPriceAtAlert,
           marginToPut,
-          sellRatioMax: asNumber(payload.sellRatioMax, 0.2),
-          minHourVolume: asNumber(payload.minHourVolume, 1_000_000),
-          concurrentCap: asNumber(payload.concurrentCap, 15),
           currentOpenTrades: openPositions.length,
-          sellRatioNow: asNumber(row?.sellRatio, asNumber(payload.sellRatioNow, 0)),
-          hourVolumeNow: asNumber(row?.hourVolume, asNumber(payload.hourVolumeNow, 0))
+          sellRatioNow,
+          hourVolumeNow
         }),
         manualAlert: {
           kind: "ENTRY_AVAILABLE",
@@ -142,10 +145,11 @@ export class ManualAlertActionResolver {
           payload: {
             ...payload,
             symbol,
-            priceAtAlert: asNumber(row?.lastPrice, asNumber(payload.priceAtAlert, 0)),
+            bybitPriceAtAlert,
+            priceAtAlert: mexcPriceAtAlert,
             marginToPut,
-            sellRatioNow: asNumber(row?.sellRatio, asNumber(payload.sellRatioNow, 0)),
-            hourVolumeNow: asNumber(row?.hourVolume, asNumber(payload.hourVolumeNow, 0))
+            sellRatioNow,
+            hourVolumeNow
           },
           buttons: ["OPENED", "REFRESH"]
         }
@@ -158,16 +162,19 @@ export class ManualAlertActionResolver {
     if (alert.kind === "EXIT_AVAILABLE" && module.buildExitAvailableTelegramMessage) {
       const symbol = normalizeSymbol(asString(payload.symbol, alert.primarySymbol));
       const position = openBySymbol.get(symbol);
-      const row = tickers.get(symbol);
+      const row = signalBySymbol.get(symbol);
 
-      if (!position || !row) {
+      if (!position) {
         return;
       }
 
       const leverage = asNumber(position.leverage, 5);
       const liq = shortLiquidationPrice(position.entryPrice, leverage);
-      const pnlPct = calcShortPnlPct(position.entryPrice, row.lastPrice, leverage);
-      const pnlUsd = calcShortPnlUsd(position.entryPrice, row.lastPrice, position.notionalUsd, position.marginUsd, leverage);
+      const mexcCurrentPrice = asNumber(row?.mexcPrice, asNumber(payload.currentPrice, position.entryPrice));
+      const pnlPct = calcShortPnlPct(position.entryPrice, mexcCurrentPrice, leverage);
+      const pnlUsd = calcShortPnlUsd(position.entryPrice, mexcCurrentPrice, position.notionalUsd, position.marginUsd, leverage);
+      const bybitEntryPrice = asNumber(payload.bybitEntryPrice, position.entryPrice);
+      const bybitCurrentPrice = asNumber(row?.bybitPrice, asNumber(payload.bybitCurrentPrice, bybitEntryPrice));
 
       const refreshedMessage: StrategyMessage = {
         type: "EXIT",
@@ -180,11 +187,13 @@ export class ManualAlertActionResolver {
           tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
           symbol,
           reason: asString(payload.reasonLabel, alert.reason ?? "Exit"),
+          bybitEntryPrice,
+          bybitCurrentPrice,
           entryPrice: position.entryPrice,
           pnlPct,
           pnlUsd,
           age: positionAge(position.entryTime, nowIso()),
-          currentPrice: row.lastPrice,
+          currentPrice: mexcCurrentPrice,
           takeProfitPrice: position.takeProfitPrice ?? 0,
           liquidationPrice: liq
         }),
@@ -195,8 +204,10 @@ export class ManualAlertActionResolver {
           payload: {
             ...payload,
             symbol,
+            bybitEntryPrice,
+            bybitCurrentPrice,
             entryPrice: position.entryPrice,
-            currentPrice: row.lastPrice,
+            currentPrice: mexcCurrentPrice,
             pnlPct,
             pnlUsd,
             age: positionAge(position.entryTime, nowIso()),
@@ -222,8 +233,8 @@ export class ManualAlertActionResolver {
       const newSymbol = normalizeSymbol(asString(payload.newSymbol, alert.primarySymbol));
 
       const loserPosition = openBySymbol.get(loserSymbol);
-      const loserRow = tickers.get(loserSymbol);
-      const newRow = tickers.get(newSymbol);
+      const loserRow = signalBySymbol.get(loserSymbol);
+      const newRow = signalBySymbol.get(newSymbol);
 
       if (!loserPosition || !loserRow || !newRow) {
         return;
@@ -232,14 +243,21 @@ export class ManualAlertActionResolver {
       const account = await this.currentAccountState();
       const marginToPut = calcMarginToPutRounded(account.cashUsd);
       const loserLeverage = asNumber(loserPosition.leverage, 5);
-      const loserPnlPct = calcShortPnlPct(loserPosition.entryPrice, loserRow.lastPrice, loserLeverage);
+      const loserPnlPct = calcShortPnlPct(loserPosition.entryPrice, loserRow.mexcPrice, loserLeverage);
       const loserPnlUsd = calcShortPnlUsd(
         loserPosition.entryPrice,
-        loserRow.lastPrice,
+        loserRow.mexcPrice,
         loserPosition.notionalUsd,
         loserPosition.marginUsd,
         loserLeverage
       );
+      const loserBybitEntryPrice = asNumber(payload.loserBybitEntryPrice, loserPosition.entryPrice);
+      const loserBybitCurrentPrice = asNumber(loserRow.bybitPrice, asNumber(payload.loserBybitCurrentPrice, loserBybitEntryPrice));
+      const newBybitPriceAtAlert = asNumber(newRow.bybitPrice, asNumber(payload.newBybitPriceAtAlert, 0));
+      const newMexcPriceAtAlert = asNumber(newRow.mexcPrice, asNumber(payload.newPriceAtAlert, 0));
+      const newSellRatioNow = asNumber(newRow.sellRatio, asNumber(payload.newSellRatioNow, 0));
+      const newHourVolumeNow = asNumber(newRow.hourVolume, asNumber(payload.newHourVolumeNow, 0));
+
       const refreshedMessage: StrategyMessage = {
         type: "ENTRY",
         symbol: newSymbol,
@@ -250,20 +268,21 @@ export class ManualAlertActionResolver {
           strategyLabel: resolveStrategyLabel(alert.strategyName, module),
           tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
           loserSymbol,
+          loserBybitEntryPrice,
+          loserBybitCurrentPrice,
           loserEntryPrice: loserPosition.entryPrice,
           loserPnlPct,
           loserPnlUsd,
           loserAge: positionAge(loserPosition.entryTime, nowIso()),
-          loserCurrentPrice: loserRow.lastPrice,
+          loserCurrentPrice: loserRow.mexcPrice,
           loserTakeProfitPrice: loserPosition.takeProfitPrice ?? 0,
           loserLiquidationPrice: shortLiquidationPrice(loserPosition.entryPrice, loserLeverage),
           newSymbol,
-          newPriceAtAlert: newRow.lastPrice,
+          newBybitPriceAtAlert,
+          newMexcPriceAtAlert,
           marginToPut,
-          sellRatioMax: asNumber(payload.sellRatioMax, 0.2),
-          minHourVolume: asNumber(payload.minHourVolume, 1_000_000),
-          newSellRatioNow: asNumber(newRow.sellRatio, asNumber(payload.newSellRatioNow, 0)),
-          newHourVolumeNow: asNumber(newRow.hourVolume, asNumber(payload.newHourVolumeNow, 0))
+          newSellRatioNow,
+          newHourVolumeNow
         }),
         manualAlert: {
           kind: "REPLACEMENT_AVAILABLE",
@@ -274,8 +293,10 @@ export class ManualAlertActionResolver {
             ...payload,
             loserSymbol,
             newSymbol,
+            loserBybitEntryPrice,
+            loserBybitCurrentPrice,
             loserEntryPrice: loserPosition.entryPrice,
-            loserCurrentPrice: loserRow.lastPrice,
+            loserCurrentPrice: loserRow.mexcPrice,
             loserPnlPct,
             loserPnlUsd,
             loserAge: positionAge(loserPosition.entryTime, nowIso()),
@@ -287,10 +308,11 @@ export class ManualAlertActionResolver {
             loserNotionalUsd: loserPosition.notionalUsd,
             loserQty: loserPosition.qty,
             loserEntrySlippageBps: loserPosition.entrySlippageBps,
-            newPriceAtAlert: newRow.lastPrice,
+            newBybitPriceAtAlert,
+            newPriceAtAlert: newMexcPriceAtAlert,
             marginToPut,
-            newSellRatioNow: asNumber(newRow.sellRatio, asNumber(payload.newSellRatioNow, 0)),
-            newHourVolumeNow: asNumber(newRow.hourVolume, asNumber(payload.newHourVolumeNow, 0))
+            newSellRatioNow,
+            newHourVolumeNow
           },
           buttons: ["OPENED", "REFRESH"]
         }
