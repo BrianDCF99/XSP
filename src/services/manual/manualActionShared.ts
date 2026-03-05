@@ -238,12 +238,29 @@ export function accountFromMexc(openPositions: MexcOpenPosition[], assets: MexcA
 }
 
 export function pickBestHistoryPosition(history: MexcHistoryPosition[], symbol: string, minTimeMs: number): MexcHistoryPosition | null {
+  const toEpochMs = (value: unknown): number | null => {
+    const raw = asNumber(value, 0);
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    return raw < 10_000_000_000 ? raw * 1000 : raw;
+  };
+
+  const eventTimeMs = (row: MexcHistoryPosition): number | null => {
+    return toEpochMs(row.updateTime) ?? toEpochMs(row.closeTime) ?? toEpochMs(row.createTime);
+  };
+
   const filtered = history
     .filter((row) => normalizeSymbol(row.symbol) === symbol)
     .filter((row) => isShortPosition(row))
     .filter((row) => asNumber(row.closeVol, 0) > 0)
-    .filter((row) => asNumber(row.updateTime, 0) >= minTimeMs)
-    .sort((a, b) => asNumber(b.updateTime, 0) - asNumber(a.updateTime, 0));
+    .filter((row) => {
+      const timeMs = eventTimeMs(row);
+      return timeMs !== null && timeMs >= minTimeMs;
+    })
+    .sort((a, b) => {
+      const aMs = eventTimeMs(a) ?? 0;
+      const bMs = eventTimeMs(b) ?? 0;
+      return bMs - aMs;
+    });
 
   return filtered[0] ?? null;
 }

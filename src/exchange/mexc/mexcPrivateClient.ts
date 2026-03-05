@@ -36,6 +36,7 @@ export interface MexcHistoryPosition {
   closeVol?: number | undefined;
   openAvgPrice?: number | undefined;
   closeAvgPrice?: number | undefined;
+  closeTime?: number | undefined;
   leverage?: number | undefined;
   oim?: number | undefined;
   im?: number | undefined;
@@ -147,6 +148,7 @@ function normalizeHistoryPosition(row: unknown): MexcHistoryPosition | null {
     closeVol: normalizeNumber(obj.closeVol),
     openAvgPrice: normalizeNumber(obj.openAvgPrice),
     closeAvgPrice: normalizeNumber(obj.closeAvgPrice),
+    closeTime: normalizeNumber(obj.closeTime ?? obj.close_time),
     leverage: normalizeNumber(obj.leverage),
     oim: normalizeNumber(obj.oim),
     im: normalizeNumber(obj.im),

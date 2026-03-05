@@ -618,7 +618,17 @@ export class ManualAlertActionResolver {
     }
 
     const lookbackMs = this.deps.cfg.manualExecution.reconcileLookbackMinutes * 60_000;
-    const startTime = Math.max(0, Date.parse(alert.createdAt) - lookbackMs);
+    const createdAtMsRaw = Date.parse(alert.createdAt);
+    const createdAtMs = Number.isFinite(createdAtMsRaw) ? createdAtMsRaw : Date.now();
+    const entryTimeRaw = asString(payload.entryTime, "");
+    const entryTimeMsRaw = Date.parse(entryTimeRaw);
+    const entryTimeMs =
+      Number.isFinite(entryTimeMsRaw) && entryTimeMsRaw > 0
+        ? entryTimeMsRaw
+        : null;
+    const startFromAlert = Math.max(0, createdAtMs - lookbackMs);
+    const entryFloorMs = entryTimeMs === null ? startFromAlert : Math.max(0, entryTimeMs - 60_000);
+    const startTime = Math.min(startFromAlert, entryFloorMs);
     const endTime = Date.now();
     const history = await this.deps.mexc.getHistoryPositions({
       symbol,
@@ -628,7 +638,7 @@ export class ManualAlertActionResolver {
       pageSize: 100
     });
 
-    const candidate = pickBestHistoryPosition(history, symbol, Date.parse(alert.createdAt));
+    const candidate = pickBestHistoryPosition(history, symbol, entryFloorMs);
     if (!candidate) {
       return {
         resolved: false,
