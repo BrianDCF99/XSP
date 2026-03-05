@@ -29,6 +29,7 @@ export interface AccountState {
   marginInUseUsd: number;
   openNotionalUsd: number;
   unrealizedPnlUsd: number;
+  netFundingUsd: number;
 }
 
 export interface FundingDetectedUpdate {
@@ -221,13 +222,18 @@ export function accountFromMexc(openPositions: MexcOpenPosition[], assets: MexcA
   const notionalFromPositions = openPositions.reduce((sum, p) => {
     return sum + positionNotionalUsd(p);
   }, 0);
+  const netFundingUsd = openPositions.reduce((sum, p) => {
+    const funding = finiteNumber(p.fundingFee);
+    return sum + (funding ?? 0);
+  }, 0);
 
   return {
     equityUsd: equity,
     cashUsd: cash,
     marginInUseUsd: margin,
     openNotionalUsd: notionalFromPositions,
-    unrealizedPnlUsd: unrealized
+    unrealizedPnlUsd: unrealized,
+    netFundingUsd
   };
 }
 
@@ -248,6 +254,7 @@ export function defaultAccountState(): AccountState {
     cashUsd: 0,
     marginInUseUsd: 0,
     openNotionalUsd: 0,
-    unrealizedPnlUsd: 0
+    unrealizedPnlUsd: 0,
+    netFundingUsd: 0
   };
 }

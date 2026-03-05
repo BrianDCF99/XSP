@@ -82,7 +82,8 @@ function buildDummyPreviews(
     equityUsd: 10_450.73,
     cashUsd: 9_610.42,
     marginInUseUsd: 840.31,
-    openNotionalUsd: 4_201.55
+    openNotionalUsd: 4_201.55,
+    netFundingUsd: -21.44
   };
 
   const baseInput = {

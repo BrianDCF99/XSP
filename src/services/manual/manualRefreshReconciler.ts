@@ -69,7 +69,7 @@ export class ManualRefreshReconciler {
     );
     const mexcOpenMap = new Map(mexcOpen.map((position) => [normalizeSymbol(position.symbol), position]));
 
-    const account = await this.currentAccountState();
+    const account = await this.currentAccountState(strategyName);
     let signalByMexcSymbol: SignalRowByMexcSymbol | null = null;
 
     for (const position of dbOpen) {
@@ -214,7 +214,10 @@ export class ManualRefreshReconciler {
           fundingUsd: item.fundingUsd,
           netFundingUsd: item.netFundingUsd
         })),
-        account
+        account: {
+          ...account,
+          netFundingUsd: account.netFundingUsd + sorted.reduce((sum, item) => sum + item.fundingUsd, 0)
+        }
       })
     };
 
@@ -566,14 +569,21 @@ export class ManualRefreshReconciler {
     }
   }
 
-  private async currentAccountState(): Promise<AccountState> {
-    const live = await this.deps.fetchLiveExchangeAccountState();
+  private async currentAccountState(strategyName: string): Promise<AccountState> {
+    const [live, stats] = await Promise.all([
+      this.deps.fetchLiveExchangeAccountState(),
+      this.deps.repos.trades.getStrategyPositionStats(strategyName)
+    ]);
+    const netFundingUsd = Number.isFinite(stats.netFundingUsd) ? Number(stats.netFundingUsd) : 0;
     const strictLiveAccount = this.deps.cfg.manualExecution.enabled && this.deps.collector.exchangeName.toLowerCase() === "mexc";
     if (!live) {
       if (strictLiveAccount) {
         throw new Error("Manual refresh requires live MEXC account source-of-truth");
       }
-      return defaultAccountState();
+      return {
+        ...defaultAccountState(),
+        netFundingUsd
+      };
     }
 
     const equityUsd = finiteNumber(live.equityUsd);
@@ -594,7 +604,8 @@ export class ManualRefreshReconciler {
       cashUsd: cashUsd ?? 0,
       marginInUseUsd: marginInUseUsd ?? 0,
       openNotionalUsd: openNotionalUsd ?? 0,
-      unrealizedPnlUsd: unrealizedPnlUsd ?? 0
+      unrealizedPnlUsd: unrealizedPnlUsd ?? 0,
+      netFundingUsd
     };
   }
 }

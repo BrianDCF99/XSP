@@ -73,7 +73,9 @@ function toAccountLines(account) {
   return [
     "<b>Account Update:</b>",
     `Eq: ${fmtUsd(account.equityUsd)} | Cash: ${fmtUsd(account.cashUsd)}`,
-    `M: ${fmtUsd(account.marginInUseUsd)} | N: ${fmtUsd(account.openNotionalUsd)}`
+    `M: ${fmtUsd(account.marginInUseUsd)} | N: ${fmtUsd(account.openNotionalUsd)}`,
+    "",
+    `Net Funding: ${fmtSignedUsd(Number(account?.netFundingUsd ?? 0))}`
   ];
 }
 

@@ -74,6 +74,8 @@ Account Update: (this line bold)
 Eq: $currentEquity | Cash: $(currEq-marginInUse)
 M: $marginInUse | N: $openNotional
 
+Net Funding: $
+
 
 ## Exit Available
 🐦‍🔥 StrategyName V#                                                
@@ -102,7 +104,9 @@ Funding: $ (could be - to indicate net negative)
 Account Update: (this line bold)
 
 Eq: $currentEquity | Cash: $(currEq-marginInUse)
-M: $marginInUse | N: $openNotional
+M: $marginInUse | N: $openNotional\
+
+Net Funding: $
 
 
 ## Entry Available
@@ -163,6 +167,8 @@ Account Update: (this line bold)
 
 Eq: $currentEquity | Cash: $(currEq-marginInUse)
 M: $marginInUse | N: $openNotional
+
+Net Funding: $
 
 
 ## Waiting For Confirmation

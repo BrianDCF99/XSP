@@ -122,7 +122,7 @@ export class ManualAlertActionResolver {
       const symbol = normalizeSymbol(asString(payload.symbol, alert.primarySymbol));
       let marginToPut = asNumber(payload.marginToPut, 0);
       try {
-        const account = await this.currentAccountState();
+        const account = await this.currentAccountState(alert.strategyName);
         const recomputedMargin = calcMarginToPutRounded(account.cashUsd);
         if (recomputedMargin > 0) {
           marginToPut = recomputedMargin;
@@ -268,7 +268,7 @@ export class ManualAlertActionResolver {
 
       let marginToPut = asNumber(payload.marginToPut, 0);
       try {
-        const account = await this.currentAccountState();
+        const account = await this.currentAccountState(alert.strategyName);
         const recomputedMargin = calcMarginToPutRounded(account.cashUsd);
         if (recomputedMargin > 0) {
           marginToPut = recomputedMargin;
@@ -473,7 +473,7 @@ export class ManualAlertActionResolver {
       ...(entrySellRatio === null ? {} : { entrySellRatio })
     };
 
-    const account = await this.currentAccountState();
+    const account = await this.currentAccountState(alert.strategyName);
 
     if (!module.buildEntryConfirmedTelegramMessage) {
       return {
@@ -562,7 +562,7 @@ export class ManualAlertActionResolver {
       entrySlippageBps: entrySlippageReal
     };
 
-    const account = await this.currentAccountState();
+    const account = await this.currentAccountState(alert.strategyName);
 
     if (!module.buildEntryConfirmedTelegramMessage) {
       return {
@@ -688,7 +688,7 @@ export class ManualAlertActionResolver {
       ...(typeof roundtripSlippageBps === "number" ? { roundtripSlippageBps } : {})
     };
 
-    const account = await this.currentAccountState();
+    const account = await this.currentAccountState(alert.strategyName);
 
     if (!module.buildExitConfirmedTelegramMessage) {
       return {
@@ -811,14 +811,21 @@ export class ManualAlertActionResolver {
     return asNumber(position.positionType, 2) === 2 && asNumber(position.holdVol, 0) > 0;
   }
 
-  private async currentAccountState(): Promise<AccountState> {
-    const live = await this.deps.fetchLiveExchangeAccountState();
+  private async currentAccountState(strategyName: string): Promise<AccountState> {
+    const [live, stats] = await Promise.all([
+      this.deps.fetchLiveExchangeAccountState(),
+      this.deps.repos.trades.getStrategyPositionStats(strategyName)
+    ]);
+    const netFundingUsd = Number.isFinite(stats.netFundingUsd) ? Number(stats.netFundingUsd) : 0;
     const strictLiveAccount = this.deps.cfg.manualExecution.enabled && this.deps.collector.exchangeName.toLowerCase() === "mexc";
     if (!live) {
       if (strictLiveAccount) {
         throw new Error("Manual alert processing requires live MEXC account source-of-truth");
       }
-      return defaultAccountState();
+      return {
+        ...defaultAccountState(),
+        netFundingUsd
+      };
     }
 
     const equityUsd = finiteNumber(live.equityUsd);
@@ -839,7 +846,8 @@ export class ManualAlertActionResolver {
       cashUsd: cashUsd ?? 0,
       marginInUseUsd: marginInUseUsd ?? 0,
       openNotionalUsd: openNotionalUsd ?? 0,
-      unrealizedPnlUsd: unrealizedPnlUsd ?? 0
+      unrealizedPnlUsd: unrealizedPnlUsd ?? 0,
+      netFundingUsd
     };
   }
 }

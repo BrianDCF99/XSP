@@ -77,6 +77,7 @@ interface BootStrategyTelegramModule {
       marginInUseUsd: number;
       openNotionalUsd: number;
       unrealizedPnlUsd: number;
+      netFundingUsd: number;
     };
   }) => string;
 }
@@ -350,7 +351,8 @@ export class BootRecoveryService {
               cashUsd: statusPayload.live.cashUsd,
               marginInUseUsd: statusPayload.live.marginInUseUsd,
               openNotionalUsd: statusPayload.live.openNotionalUsd,
-              unrealizedPnlUsd: statusPayload.live.unrealizedPnlUsd
+              unrealizedPnlUsd: statusPayload.live.unrealizedPnlUsd,
+              netFundingUsd: statusPayload.live.netFundingUsd
             }
           });
 
