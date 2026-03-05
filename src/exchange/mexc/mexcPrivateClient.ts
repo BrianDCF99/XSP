@@ -118,6 +118,8 @@ function normalizeOpenPosition(row: unknown): MexcOpenPosition | null {
     positionValue: normalizeNumber(obj.positionValue),
     fundingFee: normalizeNumber(
       obj.fundingFee ??
+        obj.holdFee ??
+        obj.hold_fee ??
         obj.funding_fee ??
         obj.totalFundingFee ??
         obj.total_funding_fee ??
@@ -151,7 +153,7 @@ function normalizeHistoryPosition(row: unknown): MexcHistoryPosition | null {
     closeProfitLoss: normalizeNumber(obj.closeProfitLoss),
     realised: normalizeNumber(obj.realised),
     totalFee: normalizeNumber(obj.totalFee),
-    fundingFee: normalizeNumber(obj.fundingFee),
+    fundingFee: normalizeNumber(obj.fundingFee ?? obj.holdFee ?? obj.hold_fee),
     positionShowStatus: normalizeNumber(obj.positionShowStatus),
     createTime: normalizeNumber(obj.createTime),
     updateTime: normalizeNumber(obj.updateTime)

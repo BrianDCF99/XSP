@@ -114,12 +114,13 @@ TICKER
     Mexc:  E: $priceAtAlert
 
     Margin: $MarginToPut
+    TP: $TPestimateOnMexcPrice
 
     SR:           x.xx
     Vol:          x.xx M
     Opened: #
 
-*** Opened | Refresh *** Buttons
+*** Opened | Decline | Refresh *** Buttons
 
 
 ## Replacement Available
