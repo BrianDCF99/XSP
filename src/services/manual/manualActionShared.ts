@@ -45,11 +45,6 @@ export interface RecentExitAlertContext {
   reason: string | null;
 }
 
-export interface RecentEntryAlertContext {
-  takeProfitPrice: number | null;
-  entrySellRatio: number | null;
-}
-
 export function asNumber(value: unknown, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -129,12 +124,6 @@ export function calcMarginToPutRounded(cashUsd: number, capUsd = 500, pct = 0.01
   const raw = Math.min(capUsd, cashUsd * pct);
   if (!Number.isFinite(raw) || raw <= 0) return 0;
   return Math.ceil(raw);
-}
-
-export function calcExitSlippageBps(expectedPrice: number | null, realizedPrice: number): number | undefined {
-  if (expectedPrice === null) return undefined;
-  if (!Number.isFinite(realizedPrice) || realizedPrice <= 0) return undefined;
-  return ((realizedPrice - expectedPrice) / expectedPrice) * 10_000;
 }
 
 export function calcRoundtripSlippageBps(entrySlippageBps: number | null, exitSlippageBps: number | undefined): number | undefined {

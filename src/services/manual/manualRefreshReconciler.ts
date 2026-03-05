@@ -12,7 +12,6 @@ import { PositionEvent, StrategyMessage } from "../../strategies/types.js";
 import {
   AccountState,
   FundingDetectedUpdate,
-  RecentEntryAlertContext,
   RecentExitAlertContext,
   StrategyTelegramModule,
   asNumber,
@@ -122,6 +121,9 @@ export class ManualRefreshReconciler {
       (position) => isShortPosition(position) && isOpenPosition(position)
     );
     const mexcOpenMap = new Map(mexcOpen.map((position) => [normalizeSymbol(position.symbol), position]));
+    const activeTakeProfitBySymbol = await this.buildActiveTakeProfitBySymbol(
+      mexcOpen.map((position) => normalizeSymbol(position.symbol))
+    );
 
     const account = await this.currentAccountState(strategyName);
     let signalByMexcSymbol: SignalRowByMexcSymbol | null = null;
@@ -161,6 +163,7 @@ export class ManualRefreshReconciler {
           symbol,
           mexcPosition,
           module,
+          activeTakeProfitBySymbol.get(symbol) ?? null,
           signalByMexcSymbol.get(symbol) ?? null,
           dbOpen.length
         );
@@ -172,7 +175,17 @@ export class ManualRefreshReconciler {
         }
       }
 
-      const entryResolved = await this.resolveManualEntryFromRefresh(strategyName, symbol, mexcPosition, module, account);
+      const entryResolved = await this.resolveManualEntryFromRefresh(
+        strategyName,
+        symbol,
+        mexcPosition,
+        module,
+        account,
+        activeTakeProfitBySymbol.get(symbol) ?? null
+      );
+      if (!entryResolved) {
+        continue;
+      }
       events.push(entryResolved.event);
       messages.push(entryResolved.message);
     }
@@ -406,15 +419,31 @@ export class ManualRefreshReconciler {
     symbol: string,
     mexcPosition: MexcOpenPosition,
     module: StrategyTelegramModule,
-    account: AccountState
-  ): Promise<{ event: PositionEvent; message: StrategyMessage }> {
+    account: AccountState,
+    takeProfitPrice: number | null
+  ): Promise<{ event: PositionEvent; message: StrategyMessage } | null> {
     const entryPrice = asNumber(mexcPosition.openAvgPrice, 0);
-    const leverage = asNumber(mexcPosition.leverage, 5);
+    const leverage = asNumber(mexcPosition.leverage, 0);
     const qty = asNumber(mexcPosition.holdVol, 0);
-    const marginUsd = asNumber(mexcPosition.im, 0) || asNumber(mexcPosition.oim, 0) || asNumber(mexcPosition.positionMargin, 0);
-    const notionalUsd = asNumber(mexcPosition.positionValue, marginUsd * leverage);
+    const marginFromMexc = asNumber(mexcPosition.im, 0) || asNumber(mexcPosition.oim, 0) || asNumber(mexcPosition.positionMargin, 0);
+    const notionalFromMexc = asNumber(mexcPosition.positionValue, 0) || (qty > 0 && entryPrice > 0 ? qty * entryPrice : 0);
+    const marginUsd =
+      marginFromMexc > 0
+        ? marginFromMexc
+        : notionalFromMexc > 0 && leverage > 0
+          ? notionalFromMexc / leverage
+          : 0;
+    const notionalUsd =
+      notionalFromMexc > 0
+        ? notionalFromMexc
+        : marginUsd > 0 && leverage > 0
+          ? marginUsd * leverage
+          : 0;
+    if (entryPrice <= 0 || leverage <= 0 || qty <= 0 || marginUsd <= 0 || notionalUsd <= 0) {
+      return null;
+    }
 
-    const entryContext = await this.resolveRecentEntryAlertContext(strategyName, symbol, entryPrice);
+    const entrySellRatio = await this.resolveRecentEntrySellRatioContext(strategyName, symbol);
     const lookbackMs = this.deps.cfg.manualExecution.reconcileLookbackMinutes * 60_000;
     const entryTargetMs = historyEpochMs(mexcPosition.createTime) ?? Date.now();
     const entryOrder = await this.findBestHistoryOrder(
@@ -426,7 +455,6 @@ export class ManualRefreshReconciler {
     );
     const entrySlippageBps = orderSlippageBps(entryOrder);
     const realizedEntryPrice = orderRealizedPrice(entryOrder) ?? entryPrice;
-    const takeProfitPrice = entryContext.takeProfitPrice;
     const liquidationPrice = asNumber(mexcPosition.liquidatePrice, shortLiquidationPrice(entryPrice, leverage));
 
     const event: PositionEvent = {
@@ -443,7 +471,7 @@ export class ManualRefreshReconciler {
       notionalUsd,
       reason: "manual entry",
       ...(takeProfitPrice === null ? {} : { takeProfitPrice }),
-      ...(entryContext.entrySellRatio === null ? {} : { entrySellRatio: entryContext.entrySellRatio }),
+      ...(entrySellRatio === null ? {} : { entrySellRatio }),
       ...(typeof entrySlippageBps === "number" ? { entrySlippageBps } : {})
     };
 
@@ -504,18 +532,7 @@ export class ManualRefreshReconciler {
     };
   }
 
-  private async resolveRecentEntryAlertContext(
-    strategyName: string,
-    symbol: string,
-    entryPrice: number
-  ): Promise<RecentEntryAlertContext> {
-    if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
-      return {
-        takeProfitPrice: null,
-        entrySellRatio: null
-      };
-    }
-
+  private async resolveRecentEntrySellRatioContext(strategyName: string, symbol: string): Promise<number | null> {
     const recentAlerts = await this.deps.repos.manualAlerts.listRecentByStrategy(
       strategyName,
       this.deps.cfg.manualExecution.reconcileLookbackMinutes
@@ -526,26 +543,10 @@ export class ManualRefreshReconciler {
       if (alert.kind !== "ENTRY_AVAILABLE" && alert.kind !== "REPLACEMENT_AVAILABLE" && alert.kind !== "ENTRY_TRACK_DECISION")
         continue;
       if (normalizeSymbol(alert.primarySymbol) !== targetSymbol) continue;
-
-      const takeProfitUnlevered = finiteNumber(alert.payload.takeProfitUnlevered);
-      if (takeProfitUnlevered === null || takeProfitUnlevered < 0) {
-        continue;
-      }
-
-      const entryFeeBps = finiteNumber(alert.payload.entryFeeBps) ?? 0;
-      const expectedEntrySlippageBps = finiteNumber(alert.payload.entrySlippageBps) ?? 0;
-      const takeProfitPrice = entryPrice * (1 - (takeProfitUnlevered + (entryFeeBps + expectedEntrySlippageBps) / 10_000));
-
-      return {
-        takeProfitPrice,
-        entrySellRatio: finiteNumber(alert.payload.entrySellRatio)
-      };
+      return finiteNumber(alert.payload.entrySellRatio);
     }
 
-    return {
-      takeProfitPrice: null,
-      entrySellRatio: null
-    };
+    return null;
   }
 
   private async resolveUntrackedSymbolDecision(
@@ -553,6 +554,7 @@ export class ManualRefreshReconciler {
     symbol: string,
     mexcPosition: MexcOpenPosition,
     module: StrategyTelegramModule,
+    takeProfitPrice: number | null,
     signal: BybitSignalRow | null,
     currentOpenTrades: number
   ): Promise<TrackDecisionState> {
@@ -576,17 +578,26 @@ export class ManualRefreshReconciler {
       return { allowEntry: false, message: null };
     }
 
-    const leverage = asNumber(mexcPosition.leverage, 5);
+    const leverage = asNumber(mexcPosition.leverage, 0);
     const qty = asNumber(mexcPosition.holdVol, 0);
-    const marginUsd = asNumber(mexcPosition.im, 0) || asNumber(mexcPosition.oim, 0) || asNumber(mexcPosition.positionMargin, 0);
-    const notionalUsd = asNumber(mexcPosition.positionValue, marginUsd * leverage);
+    const marginFromMexc = asNumber(mexcPosition.im, 0) || asNumber(mexcPosition.oim, 0) || asNumber(mexcPosition.positionMargin, 0);
+    const notionalFromMexc = asNumber(mexcPosition.positionValue, 0) || (qty > 0 && entryPrice > 0 ? qty * entryPrice : 0);
+    const marginUsd =
+      marginFromMexc > 0
+        ? marginFromMexc
+        : notionalFromMexc > 0 && leverage > 0
+          ? notionalFromMexc / leverage
+          : 0;
+    const notionalUsd =
+      notionalFromMexc > 0
+        ? notionalFromMexc
+        : marginUsd > 0 && leverage > 0
+          ? marginUsd * leverage
+          : 0;
+    if (leverage <= 0 || qty <= 0 || marginUsd <= 0 || notionalUsd <= 0) {
+      return { allowEntry: false, message: null };
+    }
 
-    const defaults = module.ENTRY_TRACK_DEFAULTS ?? {};
-    const takeProfitUnlevered = asNumber(defaults.takeProfitUnlevered, 0);
-    const entryFeeBps = asNumber(defaults.entryFeeBps, 0);
-    const entrySlippageBps = asNumber(defaults.entrySlippageBps, 0);
-    const adjustedTpPct = takeProfitUnlevered + (entryFeeBps + entrySlippageBps) / 10_000;
-    const takeProfitPrice = entryPrice * (1 - adjustedTpPct);
     const liquidationPrice = asNumber(mexcPosition.liquidatePrice, shortLiquidationPrice(entryPrice, leverage));
 
     const text = module.buildTrackDecisionTelegramMessage
@@ -597,7 +608,7 @@ export class ManualRefreshReconciler {
           tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
           symbol,
           entryPrice,
-          takeProfitPrice,
+          ...(takeProfitPrice === null ? {} : { takeProfitPrice }),
           liquidationPrice,
           sellRatioMax: 0.2,
           minHourVolume: 1_000_000,
@@ -624,10 +635,7 @@ export class ManualRefreshReconciler {
           qty,
           marginUsd,
           notionalUsd,
-          takeProfitUnlevered,
-          entryFeeBps,
-          entrySlippageBps,
-          takeProfitPrice,
+          ...(takeProfitPrice === null ? {} : { takeProfitPrice }),
           liquidationPrice,
           sellRatioNow: signal?.sellRatio ?? null,
           hourVolumeNow: signal?.hourVolume ?? null,
@@ -638,6 +646,39 @@ export class ManualRefreshReconciler {
     };
 
     return { allowEntry: false, message };
+  }
+
+  private async buildActiveTakeProfitBySymbol(symbols: string[]): Promise<Map<string, number>> {
+    const symbolFilter = new Set(symbols.map((value) => normalizeSymbol(value)));
+    if (symbolFilter.size === 0) return new Map();
+
+    let stopOrders: MexcStopOrder[];
+    try {
+      stopOrders = await this.deps.mexc.getStopOrders();
+    } catch {
+      return new Map();
+    }
+    const bySymbol = new Map<string, MexcStopOrder>();
+
+    for (const order of stopOrders) {
+      if (!this.isActiveStopOrder(order)) continue;
+      const symbol = normalizeSymbol(order.symbol);
+      if (!symbolFilter.has(symbol)) continue;
+
+      const tp = asNumber(order.takeProfitPrice, 0);
+      if (!Number.isFinite(tp) || tp <= 0) continue;
+
+      const current = bySymbol.get(symbol);
+      const currentUpdate = asNumber(current?.updateTime, 0);
+      const candidateUpdate = asNumber(order.updateTime, 0);
+      if (!current || candidateUpdate >= currentUpdate) {
+        bySymbol.set(symbol, order);
+      }
+    }
+
+    return new Map(
+      [...bySymbol.entries()].map(([symbol, order]) => [symbol, asNumber(order.takeProfitPrice, 0)])
+    );
   }
 
   private isActiveStopOrder(order: MexcStopOrder): boolean {

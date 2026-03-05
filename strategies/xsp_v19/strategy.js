@@ -196,7 +196,7 @@ function createExitAvailableMessage(input, position, market, reason) {
 
   const exitButtons =
     reason.code === "TP" || reason.code === "LIQUIDATION"
-      ? ["REFRESH"]
+      ? []
       : ["CLOSED", "REFRESH"];
 
   return {

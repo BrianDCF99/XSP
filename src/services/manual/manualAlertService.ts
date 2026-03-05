@@ -89,7 +89,7 @@ export class ManualAlertService {
       prepared.push({
         ...message,
         manualAlertId: alertId,
-        replyMarkup: toReplyMarkup(alertId, message.manualAlert.buttons)
+        ...(message.manualAlert.buttons.length > 0 ? { replyMarkup: toReplyMarkup(alertId, message.manualAlert.buttons) } : {})
       });
     }
 

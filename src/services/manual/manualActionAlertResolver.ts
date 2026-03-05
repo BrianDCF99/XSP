@@ -7,7 +7,7 @@ import { Repositories } from "../../db/repos/index.js";
 import { ExchangeAccountState } from "../../exchange/accountStateExtractor.js";
 import { ExchangeCollector } from "../../exchange/exchangeCollector.js";
 import { extractBybitSignalRows } from "../../exchange/signalMarketExtractor.js";
-import { MexcHistoryOrder, MexcOpenPosition, MexcPrivateClient } from "../../exchange/mexc/mexcPrivateClient.js";
+import { MexcHistoryOrder, MexcOpenPosition, MexcPrivateClient, MexcStopOrder } from "../../exchange/mexc/mexcPrivateClient.js";
 import { TelegramClient } from "../../notifications/telegramClient.js";
 import { ManualAlertButtonAction, PositionEvent, StrategyMessage } from "../../strategies/types.js";
 import { Logger } from "../../utils/logger.js";
@@ -40,6 +40,7 @@ import {
 
 const MEXC_SIDE_CLOSE_SHORT = 2;
 const MEXC_SIDE_OPEN_SHORT = 3;
+const MEXC_STOP_ACTIVE_STATE = 1;
 
 interface AlertActionResult {
   resolved: boolean;
@@ -196,6 +197,10 @@ export class ManualAlertActionResolver {
       const symbol = normalizeSymbol(asString(payload.symbol, alert.primarySymbol));
       const position = openBySymbol.get(symbol);
       const row = signalBySymbol.get(symbol);
+      const reasonCode = String(payload.reasonCode ?? "").trim().toUpperCase();
+      const expectedType = String(payload.expectedEventType ?? "").trim().toUpperCase();
+      const reasonLabel = String(payload.reasonLabel ?? alert.reason ?? "").trim().toUpperCase();
+      const shouldAutoOnly = reasonCode === "TP" || reasonCode === "LIQUIDATION" || expectedType === "LIQUIDATION" || reasonLabel === "TAKE PROFIT" || reasonLabel === "LIQUIDATION";
 
       if (!position) {
         return;
@@ -253,7 +258,7 @@ export class ManualAlertActionResolver {
             entrySlippageBps: position.entrySlippageBps,
             entryTime: position.entryTime
           },
-          buttons: ["CLOSED", "REFRESH"]
+          buttons: shouldAutoOnly ? [] : ["CLOSED", "REFRESH"]
         }
       };
 
@@ -449,19 +454,47 @@ export class ManualAlertActionResolver {
       };
     }
 
-    const entryPrice = asNumber(opened.openAvgPrice, asNumber(payload.entryPrice, 0));
-    const leverage = asNumber(opened.leverage, asNumber(payload.leverage, 5));
-    const qty = asNumber(opened.holdVol, asNumber(payload.qty, 0));
-    const marginUsd = asNumber(opened.im, 0) || asNumber(opened.oim, 0) || asNumber(opened.positionMargin, asNumber(payload.marginUsd, 0));
-    const notionalUsd = asNumber(opened.positionValue, marginUsd > 0 ? marginUsd * leverage : asNumber(payload.notionalUsd, 0));
+    const entryPrice = asNumber(opened.openAvgPrice, 0);
+    const leverage = asNumber(opened.leverage, 0);
+    const qty = asNumber(opened.holdVol, 0);
+    const marginFromMexc = asNumber(opened.im, 0) || asNumber(opened.oim, 0) || asNumber(opened.positionMargin, 0);
+    const notionalFromMexc = asNumber(opened.positionValue, 0) || (qty > 0 && entryPrice > 0 ? qty * entryPrice : 0);
+    const marginUsd =
+      marginFromMexc > 0
+        ? marginFromMexc
+        : notionalFromMexc > 0 && leverage > 0
+          ? notionalFromMexc / leverage
+          : 0;
+    const notionalUsd =
+      notionalFromMexc > 0
+        ? notionalFromMexc
+        : marginUsd > 0 && leverage > 0
+          ? marginUsd * leverage
+          : 0;
+    if (entryPrice <= 0 || leverage <= 0 || qty <= 0 || marginUsd <= 0 || notionalUsd <= 0) {
+      return {
+        resolved: false,
+        events: [],
+        messages: [],
+        waitingSymbol: symbol,
+        waitingReason: "entry_fields_missing_from_mexc"
+      };
+    }
 
-    const takeProfitUnlevered = Math.max(0, asNumber(payload.takeProfitUnlevered, 0));
-    const entryFeeBps = asNumber(payload.entryFeeBps, 0);
-    const expectedEntrySlippageBps = asNumber(payload.entrySlippageBps, 0);
-    const adjustedTpPct = takeProfitUnlevered + (entryFeeBps + expectedEntrySlippageBps) / 10_000;
-    const takeProfitPrice = entryPrice * (1 - adjustedTpPct);
+    const takeProfitPrice = await this.resolveActiveTakeProfitPrice(symbol);
     const liquidationPrice = asNumber(opened.liquidatePrice, shortLiquidationPrice(entryPrice, leverage));
     const entrySellRatio = finiteNumber(payload.entrySellRatio);
+    const lookbackMs = this.deps.cfg.manualExecution.reconcileLookbackMinutes * 60_000;
+    const entryTargetMs = historyEpochMs(opened.createTime) ?? Date.now();
+    const entryOrder = await this.findBestHistoryOrder(
+      symbol,
+      Math.max(0, entryTargetMs - lookbackMs),
+      Date.now(),
+      MEXC_SIDE_OPEN_SHORT,
+      entryTargetMs
+    );
+    const entrySlippageReal = orderSlippageBps(entryOrder ?? undefined);
+    const realizedEntryPrice = orderRealizedPrice(entryOrder ?? undefined) ?? entryPrice;
 
     const event: PositionEvent = {
       type: "ENTRY",
@@ -469,15 +502,16 @@ export class ManualAlertActionResolver {
       symbol,
       exchange: this.deps.collector.exchangeName,
       side: "SHORT",
-      eventTime: nowIso(),
-      price: entryPrice,
+      eventTime: entryOrder ? historyOrderEventTimeIso(entryOrder, nowIso()) : nowIso(),
+      price: realizedEntryPrice,
       qty,
       leverage,
       marginUsd,
       notionalUsd,
       reason: "manual tracked entry",
-      takeProfitPrice,
-      ...(entrySellRatio === null ? {} : { entrySellRatio })
+      ...(takeProfitPrice === null ? {} : { takeProfitPrice }),
+      ...(entrySellRatio === null ? {} : { entrySellRatio }),
+      ...(typeof entrySlippageReal === "number" ? { entrySlippageBps: entrySlippageReal } : {})
     };
 
     const account = await this.currentAccountState(alert.strategyName);
@@ -501,9 +535,10 @@ export class ManualAlertActionResolver {
         tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
         symbol,
         entryPrice,
-        realizedEntryPrice: entryPrice,
-        takeProfitPrice,
+        realizedEntryPrice,
+        ...(takeProfitPrice === null ? {} : { takeProfitPrice }),
         liquidationPrice,
+        ...(typeof entrySlippageReal === "number" ? { entrySlippageBps: entrySlippageReal } : {}),
         account
       })
     };
@@ -534,11 +569,32 @@ export class ManualAlertActionResolver {
       };
     }
 
-    const entryPrice = asNumber(opened.openAvgPrice, asNumber(payload.priceAtAlert, 0));
-    const leverage = asNumber(opened.leverage, asNumber(payload.leverage, 5));
+    const entryPrice = asNumber(opened.openAvgPrice, 0);
+    const leverage = asNumber(opened.leverage, 0);
     const qty = asNumber(opened.holdVol, 0);
-    const marginUsd = asNumber(opened.im, 0) || asNumber(opened.oim, 0) || asNumber(opened.positionMargin, 0);
-    const notionalUsd = asNumber(opened.positionValue, marginUsd * leverage || qty * entryPrice);
+    const marginFromMexc = asNumber(opened.im, 0) || asNumber(opened.oim, 0) || asNumber(opened.positionMargin, 0);
+    const notionalFromMexc = asNumber(opened.positionValue, 0) || (qty > 0 && entryPrice > 0 ? qty * entryPrice : 0);
+    const marginUsd =
+      marginFromMexc > 0
+        ? marginFromMexc
+        : notionalFromMexc > 0 && leverage > 0
+          ? notionalFromMexc / leverage
+          : 0;
+    const notionalUsd =
+      notionalFromMexc > 0
+        ? notionalFromMexc
+        : marginUsd > 0 && leverage > 0
+          ? marginUsd * leverage
+          : 0;
+    if (entryPrice <= 0 || leverage <= 0 || qty <= 0 || marginUsd <= 0 || notionalUsd <= 0) {
+      return {
+        resolved: false,
+        events: [],
+        messages: [],
+        waitingSymbol: symbol,
+        waitingReason: "entry_fields_missing_from_mexc"
+      };
+    }
     const lookbackMs = this.deps.cfg.manualExecution.reconcileLookbackMinutes * 60_000;
     const entryTargetMs = historyEpochMs(opened.createTime) ?? Date.now();
     const entryOrder = await this.findBestHistoryOrder(
@@ -551,14 +607,8 @@ export class ManualAlertActionResolver {
     const entrySlippageReal = orderSlippageBps(entryOrder ?? undefined);
     const realizedEntryPrice = orderRealizedPrice(entryOrder ?? undefined) ?? entryPrice;
 
-    const tpUnlevered = Math.max(0, asNumber(payload.takeProfitUnlevered, 0));
-    const entryFeeBps = asNumber(payload.entryFeeBps, 0);
-    const entrySlippageBps = asNumber(payload.entrySlippageBps, 0);
-    const adjustedTpPct = tpUnlevered + (entryFeeBps + entrySlippageBps) / 10_000;
-    const takeProfitPrice = entryPrice * (1 - adjustedTpPct);
+    const takeProfitPrice = await this.resolveActiveTakeProfitPrice(symbol);
     const liquidationPrice = asNumber(opened.liquidatePrice, shortLiquidationPrice(entryPrice, leverage));
-
-    const alertPrice = asNumber(payload.priceAtAlert, entryPrice);
     const entrySellRatio = finiteNumber(payload.entrySellRatio);
 
     const event: PositionEvent = {
@@ -574,7 +624,7 @@ export class ManualAlertActionResolver {
       marginUsd,
       notionalUsd,
       reason: "MANUAL_OPEN_CONFIRMED",
-      takeProfitPrice,
+      ...(takeProfitPrice === null ? {} : { takeProfitPrice }),
       ...(entrySellRatio === null ? {} : { entrySellRatio }),
       ...(typeof entrySlippageReal === "number" ? { entrySlippageBps: entrySlippageReal } : {})
     };
@@ -599,9 +649,9 @@ export class ManualAlertActionResolver {
         strategyLabel: resolveStrategyLabel(alert.strategyName, module),
         tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
         symbol,
-        entryPrice: alertPrice,
+        entryPrice,
         realizedEntryPrice,
-        takeProfitPrice,
+        ...(takeProfitPrice === null ? {} : { takeProfitPrice }),
         liquidationPrice,
         ...(typeof entrySlippageReal === "number" ? { entrySlippageBps: entrySlippageReal } : {}),
         account
@@ -649,7 +699,7 @@ export class ManualAlertActionResolver {
     const lookbackMs = this.deps.cfg.manualExecution.reconcileLookbackMinutes * 60_000;
     const createdAtMsRaw = Date.parse(alert.createdAt);
     const createdAtMs = Number.isFinite(createdAtMsRaw) ? createdAtMsRaw : Date.now();
-    const entryTimeRaw = asString(payload.entryTime, "");
+    const entryTimeRaw = asString(openPosition.entryTime, "");
     const entryTimeMsRaw = Date.parse(entryTimeRaw);
     const entryTimeMs =
       Number.isFinite(entryTimeMsRaw) && entryTimeMsRaw > 0
@@ -678,7 +728,7 @@ export class ManualAlertActionResolver {
       };
     }
 
-    const entryPrice = asNumber(candidate.openAvgPrice, asNumber(payload.entryPrice, 0));
+    const entryPrice = asNumber(candidate.openAvgPrice, openPosition.entryPrice);
     const closeEventTime = historyPositionEventTimeIso(candidate, nowIso());
     const closeEventMs = Date.parse(closeEventTime);
     const exitOrder = await this.findBestHistoryOrder(
@@ -696,10 +746,19 @@ export class ManualAlertActionResolver {
       entryTimeMs ?? undefined
     );
     const exitPrice = orderRealizedPrice(exitOrder) ?? asNumber(candidate.closeAvgPrice, 0);
-    const leverage = asNumber(candidate.leverage, asNumber(payload.leverage, 5));
-    const qty = asNumber(candidate.closeVol, asNumber(payload.qty, 0));
-    const marginUsd = asNumber(candidate.im, 0) || asNumber(candidate.oim, 0) || asNumber(payload.marginUsd, 0);
-    const notionalUsd = marginUsd > 0 ? marginUsd * leverage : asNumber(payload.notionalUsd, 0);
+    const leverage = asNumber(candidate.leverage, openPosition.leverage);
+    const qty = asNumber(candidate.closeVol, openPosition.qty);
+    const marginUsd = asNumber(candidate.im, 0) || asNumber(candidate.oim, 0) || openPosition.marginUsd;
+    const notionalUsd = marginUsd > 0 && leverage > 0 ? marginUsd * leverage : openPosition.notionalUsd;
+    if (entryPrice <= 0 || exitPrice <= 0 || leverage <= 0 || qty <= 0 || marginUsd <= 0 || notionalUsd <= 0) {
+      return {
+        resolved: false,
+        events: [],
+        messages: [],
+        waitingSymbol: symbol,
+        waitingReason: "exit_fields_missing_from_mexc"
+      };
+    }
 
     const pnlUsdRaw = asNumber(candidate.realised, Number.NaN);
     const pnlUsdFallback = asNumber(
@@ -713,11 +772,11 @@ export class ManualAlertActionResolver {
     const type = mapExpectedEventType(payload.expectedEventType);
     const reason = asString(payload.reasonLabel, alert.reason ?? "Exit");
     const entrySlippageBps = orderSlippageBps(entryOrder) ?? null;
-    const takeProfitPrice = finiteNumber(payload.takeProfitPrice);
+    const takeProfitPrice = finiteNumber(openPosition.takeProfitPrice);
     const entrySellRatio = finiteNumber(payload.entrySellRatio);
     const exitSlippageBps = orderSlippageBps(exitOrder);
     const roundtripSlippageBps = calcRoundtripSlippageBps(entrySlippageBps, exitSlippageBps);
-    const entryTimeIso = asString(payload.entryTime, openPosition?.entryTime ?? "");
+    const entryTimeIso = asString(openPosition.entryTime, "");
     const closedAge = entryTimeIso.length > 0 ? positionAge(entryTimeIso, closeEventTime) : undefined;
     const entryUsd =
       Number.isFinite(marginUsd) && marginUsd > 0
@@ -889,6 +948,47 @@ export class ManualAlertActionResolver {
     });
 
     return pickBestHistoryOrder(historyOrders, symbol, side, startTime, targetTimeMs);
+  }
+
+  private async resolveActiveTakeProfitPrice(symbol: string): Promise<number | null> {
+    let stopOrders: MexcStopOrder[];
+    try {
+      stopOrders = await this.deps.mexc.getStopOrders(symbol);
+    } catch (error) {
+      this.deps.logger.warn("failed to fetch MEXC stop orders for TP", {
+        symbol,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return null;
+    }
+    const target = normalizeSymbol(symbol);
+    let candidate: MexcStopOrder | null = null;
+
+    for (const order of stopOrders) {
+      if (!this.isActiveStopOrder(order)) continue;
+      if (normalizeSymbol(order.symbol) !== target) continue;
+      const tp = asNumber(order.takeProfitPrice, 0);
+      if (!Number.isFinite(tp) || tp <= 0) continue;
+
+      const currentUpdate = candidate ? asNumber(candidate.updateTime, 0) : -1;
+      const nextUpdate = asNumber(order.updateTime, 0);
+      if (!candidate || nextUpdate >= currentUpdate) {
+        candidate = order;
+      }
+    }
+
+    if (!candidate) return null;
+    const tp = asNumber(candidate.takeProfitPrice, 0);
+    if (!Number.isFinite(tp) || tp <= 0) return null;
+    return tp;
+  }
+
+  private isActiveStopOrder(order: MexcStopOrder): boolean {
+    const isFinished = asNumber(order.isFinished, 0);
+    const state = asNumber(order.state, 0);
+    if (isFinished === 1) return false;
+    if (state !== MEXC_STOP_ACTIVE_STATE) return false;
+    return true;
   }
 
   private isShortOpenPosition(position: MexcOpenPosition): boolean {
