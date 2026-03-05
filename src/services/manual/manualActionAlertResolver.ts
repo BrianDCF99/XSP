@@ -27,6 +27,7 @@ import {
   historyPositionEventTimeIso,
   mapExpectedEventType,
   normalizeSymbol,
+  normalizeSlippageBps,
   nowIso,
   orderRealizedPrice,
   orderSlippageBps,
@@ -493,7 +494,7 @@ export class ManualAlertActionResolver {
       MEXC_SIDE_OPEN_SHORT,
       entryTargetMs
     );
-    const entrySlippageReal = orderSlippageBps(entryOrder ?? undefined);
+    const entrySlippageReal = normalizeSlippageBps(orderSlippageBps(entryOrder ?? undefined), "SHORT", "ENTRY");
     const realizedEntryPrice = orderRealizedPrice(entryOrder ?? undefined) ?? entryPrice;
 
     const event: PositionEvent = {
@@ -604,7 +605,7 @@ export class ManualAlertActionResolver {
       MEXC_SIDE_OPEN_SHORT,
       entryTargetMs
     );
-    const entrySlippageReal = orderSlippageBps(entryOrder ?? undefined);
+    const entrySlippageReal = normalizeSlippageBps(orderSlippageBps(entryOrder ?? undefined), "SHORT", "ENTRY");
     const realizedEntryPrice = orderRealizedPrice(entryOrder ?? undefined) ?? entryPrice;
 
     const takeProfitPrice = await this.resolveActiveTakeProfitPrice(symbol);
@@ -771,10 +772,10 @@ export class ManualAlertActionResolver {
 
     const type = mapExpectedEventType(payload.expectedEventType);
     const reason = asString(payload.reasonLabel, alert.reason ?? "Exit");
-    const entrySlippageBps = orderSlippageBps(entryOrder) ?? null;
+    const entrySlippageBps = normalizeSlippageBps(orderSlippageBps(entryOrder), "SHORT", "ENTRY") ?? null;
     const takeProfitPrice = finiteNumber(openPosition.takeProfitPrice);
     const entrySellRatio = finiteNumber(payload.entrySellRatio);
-    const exitSlippageBps = orderSlippageBps(exitOrder);
+    const exitSlippageBps = normalizeSlippageBps(orderSlippageBps(exitOrder), "SHORT", "EXIT");
     const roundtripSlippageBps = calcRoundtripSlippageBps(entrySlippageBps, exitSlippageBps);
     const entryTimeIso = asString(openPosition.entryTime, "");
     const closedAge = entryTimeIso.length > 0 ? positionAge(entryTimeIso, closeEventTime) : undefined;

@@ -28,6 +28,7 @@ import {
   isShortPosition,
   mapExpectedEventType,
   normalizeSymbol,
+  normalizeSlippageBps,
   nowIso,
   orderRealizedPrice,
   orderSlippageBps,
@@ -348,8 +349,8 @@ export class ManualRefreshReconciler {
     const recentExitContext = await this.resolveRecentExitAlertContext(strategyName, symbol);
     const eventType = recentExitContext.type ?? "EXIT";
     const reason = recentExitContext.reason ?? "manual exit";
-    const entrySlippageBps = orderSlippageBps(entryOrder) ?? null;
-    const exitSlippageBps = orderSlippageBps(exitOrder);
+    const entrySlippageBps = normalizeSlippageBps(orderSlippageBps(entryOrder), "SHORT", "ENTRY") ?? null;
+    const exitSlippageBps = normalizeSlippageBps(orderSlippageBps(exitOrder), "SHORT", "EXIT");
     const roundtripSlippageBps = calcRoundtripSlippageBps(entrySlippageBps, exitSlippageBps);
     const entryUsd =
       Number.isFinite(marginUsd) && marginUsd > 0
@@ -453,7 +454,7 @@ export class ManualRefreshReconciler {
       MEXC_SIDE_OPEN_SHORT,
       entryTargetMs
     );
-    const entrySlippageBps = orderSlippageBps(entryOrder);
+    const entrySlippageBps = normalizeSlippageBps(orderSlippageBps(entryOrder), "SHORT", "ENTRY");
     const realizedEntryPrice = orderRealizedPrice(entryOrder) ?? entryPrice;
     const liquidationPrice = asNumber(mexcPosition.liquidatePrice, shortLiquidationPrice(entryPrice, leverage));
 

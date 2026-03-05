@@ -17,6 +17,7 @@ import {
   calcRoundtripSlippageBps,
   historyPositionEventTimeIso,
   normalizeSymbol,
+  normalizeSlippageBps,
   orderSlippageBps,
   pickBestHistoryOrder,
   positionAge
@@ -295,8 +296,8 @@ export class BootRecoveryService {
     );
 
     return {
-      entrySlippageBps: orderSlippageBps(entryOrder) ?? null,
-      exitSlippageBps: orderSlippageBps(closeOrder)
+      entrySlippageBps: normalizeSlippageBps(orderSlippageBps(entryOrder), position.side, "ENTRY") ?? null,
+      exitSlippageBps: normalizeSlippageBps(orderSlippageBps(closeOrder), position.side, "EXIT")
     };
   }
 

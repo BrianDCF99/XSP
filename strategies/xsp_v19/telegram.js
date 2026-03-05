@@ -57,8 +57,7 @@ function fmtBps(value) {
 
 function fmtSignedBps(value) {
   if (!Number.isFinite(value)) return "N/A";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(2)} bps`;
+  return `${value.toFixed(2)} bps`;
 }
 
 function fmtAge(value) {

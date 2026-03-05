@@ -154,6 +154,16 @@ export function orderSlippageBps(order: MexcHistoryOrder | null | undefined): nu
   return ((realized - expected) / expected) * 10_000;
 }
 
+export function normalizeSlippageBps(
+  rawBps: number | null | undefined,
+  side: PositionEvent["side"],
+  leg: "ENTRY" | "EXIT"
+): number | undefined {
+  if (typeof rawBps !== "number" || !Number.isFinite(rawBps)) return undefined;
+  const shouldFlip = (side === "SHORT" && leg === "EXIT") || (side === "LONG" && leg === "ENTRY");
+  return shouldFlip ? -rawBps : rawBps;
+}
+
 export function orderRealizedPrice(order: MexcHistoryOrder | null | undefined): number | undefined {
   if (!order) return undefined;
   const realized = positiveFiniteNumber(order.dealAvgPrice);
