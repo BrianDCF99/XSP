@@ -54,7 +54,7 @@ export class ManualAlertService {
         continue;
       }
 
-      if (shouldHonorDeclineMute(message.manualAlert.kind)) {
+      if (shouldHonorDeclineMute(message.manualAlert.kind) && message.manualAlert.bypassDeclineMute !== true) {
         const symbol = message.manualAlert.primarySymbol.trim().toUpperCase();
         const cacheKey = `${strategyName}|${symbol}`;
         let muted = muteCache.get(cacheKey);

@@ -25,6 +25,7 @@ export interface ManualAlertRequest {
   reason?: string;
   payload: Record<string, unknown>;
   buttons: ManualAlertButtonAction[];
+  bypassDeclineMute?: boolean;
 }
 
 export interface StrategyMessage {

@@ -119,9 +119,22 @@ export class ManualAlertActionResolver {
     const payload = alert.payload;
 
     if (alert.kind === "ENTRY_AVAILABLE" && module.buildEntryAvailableTelegramMessage) {
-      const account = await this.currentAccountState();
-      const marginToPut = calcMarginToPutRounded(account.cashUsd);
       const symbol = normalizeSymbol(asString(payload.symbol, alert.primarySymbol));
+      let marginToPut = asNumber(payload.marginToPut, 0);
+      try {
+        const account = await this.currentAccountState();
+        const recomputedMargin = calcMarginToPutRounded(account.cashUsd);
+        if (recomputedMargin > 0) {
+          marginToPut = recomputedMargin;
+        }
+      } catch (error) {
+        this.deps.logger.warn("entry refresh using cached margin fallback", {
+          alertId: alert.id,
+          strategy: alert.strategyName,
+          symbol,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
       const row = signalBySymbol.get(symbol);
       const bybitPriceAtAlert = asNumber(row?.bybitPrice, asNumber(payload.bybitPriceAtAlert, 0));
       const mexcPriceAtAlert = asNumber(row?.mexcPrice, asNumber(payload.priceAtAlert, 0));
@@ -153,6 +166,7 @@ export class ManualAlertActionResolver {
         manualAlert: {
           kind: "ENTRY_AVAILABLE",
           primarySymbol: symbol,
+          bypassDeclineMute: true,
           payload: {
             ...payload,
             symbol,
@@ -252,8 +266,21 @@ export class ManualAlertActionResolver {
         return;
       }
 
-      const account = await this.currentAccountState();
-      const marginToPut = calcMarginToPutRounded(account.cashUsd);
+      let marginToPut = asNumber(payload.marginToPut, 0);
+      try {
+        const account = await this.currentAccountState();
+        const recomputedMargin = calcMarginToPutRounded(account.cashUsd);
+        if (recomputedMargin > 0) {
+          marginToPut = recomputedMargin;
+        }
+      } catch (error) {
+        this.deps.logger.warn("replacement refresh using cached margin fallback", {
+          alertId: alert.id,
+          strategy: alert.strategyName,
+          symbol: newSymbol,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
       const loserLeverage = asNumber(loserPosition.leverage, 5);
       const loserPnlPct = calcShortPnlPct(loserPosition.entryPrice, loserRow.mexcPrice, loserLeverage);
       const loserPnlUsd = calcShortPnlUsd(
@@ -302,6 +329,7 @@ export class ManualAlertActionResolver {
           primarySymbol: newSymbol,
           secondarySymbol: loserSymbol,
           reason: "Replacement",
+          bypassDeclineMute: true,
           payload: {
             ...payload,
             loserSymbol,

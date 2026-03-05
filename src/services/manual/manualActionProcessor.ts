@@ -106,17 +106,20 @@ export class ManualActionProcessor {
       return;
     }
 
+    // Manual refresh should always be allowed as an operator override,
+    // even when the original alert has already been confirmed.
+    if (decoded.action === "REFRESH") {
+      await this.telegram.answerCallbackQuery(callback.id);
+      await this.alertResolver.refreshOneAlert(alert);
+      return;
+    }
+
     if (alert.status === "CONFIRMED") {
       await this.telegram.answerCallbackQuery(callback.id, "Already confirmed");
       return;
     }
 
     await this.telegram.answerCallbackQuery(callback.id);
-
-    if (decoded.action === "REFRESH") {
-      await this.alertResolver.refreshOneAlert(alert);
-      return;
-    }
 
     await this.alertResolver.resolveAlertAction(alert, decoded.action as ManualAlertButtonAction, true);
   }
