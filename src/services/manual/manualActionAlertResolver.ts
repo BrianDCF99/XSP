@@ -676,6 +676,7 @@ export class ManualAlertActionResolver {
     );
     const pnlUsd = Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : pnlUsdFallback;
     const pnlPct = marginUsd > 0 ? (pnlUsd / marginUsd) * 100 : calcShortPnlPct(entryPrice, exitPrice, leverage);
+    const fundingUsd = asNumber(candidate.fundingFee, 0);
 
     const type = mapExpectedEventType(payload.expectedEventType);
     const reason = asString(payload.reasonLabel, alert.reason ?? "Exit");
@@ -689,15 +690,12 @@ export class ManualAlertActionResolver {
     const closeEventTime = historyPositionEventTimeIso(candidate, nowIso());
     const closedAge = entryTimeIso.length > 0 ? positionAge(entryTimeIso, closeEventTime) : undefined;
     const entryUsd =
-      Number.isFinite(notionalUsd) && notionalUsd > 0
-        ? notionalUsd
-        : Number.isFinite(qty) && qty > 0 && Number.isFinite(entryPrice) && entryPrice > 0
-          ? qty * entryPrice
+      Number.isFinite(marginUsd) && marginUsd > 0
+        ? marginUsd
+        : Number.isFinite(notionalUsd) && notionalUsd > 0 && Number.isFinite(leverage) && leverage > 0
+          ? notionalUsd / leverage
           : 0;
-    const exitUsd =
-      Number.isFinite(qty) && qty > 0 && Number.isFinite(exitPrice) && exitPrice > 0
-        ? qty * exitPrice
-        : entryUsd;
+    const exitUsd = Number.isFinite(entryUsd) ? entryUsd + pnlUsd + fundingUsd : 0;
 
     const event: PositionEvent = {
       type,
@@ -714,7 +712,7 @@ export class ManualAlertActionResolver {
       pnlPct,
       pnlUsd,
       reason,
-      fundingUsd: asNumber(candidate.fundingFee, 0),
+      fundingUsd,
       ...(takeProfitPrice === null ? {} : { takeProfitPrice }),
       ...(entrySellRatio === null ? {} : { entrySellRatio }),
       ...(entrySlippageBps === null ? {} : { entrySlippageBps }),
@@ -751,7 +749,7 @@ export class ManualAlertActionResolver {
         ...(typeof entrySlippageBps === "number" ? { entrySlippageBps } : {}),
         ...(typeof exitSlippageBps === "number" ? { exitSlippageBps } : {}),
         ...(typeof roundtripSlippageBps === "number" ? { roundtripSlippageBps } : {}),
-        fundingUsd: asNumber(candidate.fundingFee, 0),
+        fundingUsd,
         account
       })
     };

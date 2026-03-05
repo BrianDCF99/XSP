@@ -263,6 +263,7 @@ export class ManualRefreshReconciler {
     const notionalUsd = marginUsd > 0 ? marginUsd * leverage : dbPosition.notionalUsd;
     const pnlUsd = Number.isFinite(candidate.realised) ? asNumber(candidate.realised, 0) : asNumber(candidate.closeProfitLoss, 0);
     const pnlPct = marginUsd > 0 ? (pnlUsd / marginUsd) * 100 : calcShortPnlPct(entryPrice, exitPrice, leverage);
+    const fundingUsd = asNumber(candidate.fundingFee, 0);
     const recentExitContext = await this.resolveRecentExitAlertContext(strategyName, symbol);
     const eventType = recentExitContext.type ?? "EXIT";
     const reason = recentExitContext.reason ?? "manual exit";
@@ -271,15 +272,12 @@ export class ManualRefreshReconciler {
     const roundtripSlippageBps = calcRoundtripSlippageBps(entrySlippageBps, exitSlippageBps);
     const closeEventTime = historyPositionEventTimeIso(candidate, nowIso());
     const entryUsd =
-      Number.isFinite(notionalUsd) && notionalUsd > 0
-        ? notionalUsd
-        : Number.isFinite(qty) && qty > 0 && Number.isFinite(entryPrice) && entryPrice > 0
-          ? qty * entryPrice
+      Number.isFinite(marginUsd) && marginUsd > 0
+        ? marginUsd
+        : Number.isFinite(notionalUsd) && notionalUsd > 0 && Number.isFinite(leverage) && leverage > 0
+          ? notionalUsd / leverage
           : 0;
-    const exitUsd =
-      Number.isFinite(qty) && qty > 0 && Number.isFinite(exitPrice) && exitPrice > 0
-        ? qty * exitPrice
-        : entryUsd;
+    const exitUsd = Number.isFinite(entryUsd) ? entryUsd + pnlUsd + fundingUsd : 0;
 
     const event: PositionEvent = {
       type: eventType,
@@ -296,7 +294,7 @@ export class ManualRefreshReconciler {
       pnlPct,
       pnlUsd,
       reason,
-      fundingUsd: asNumber(candidate.fundingFee, 0),
+      fundingUsd,
       ...(entrySlippageBps === null ? {} : { entrySlippageBps }),
       ...(typeof exitSlippageBps === "number" ? { exitSlippageBps } : {}),
       ...(typeof roundtripSlippageBps === "number" ? { roundtripSlippageBps } : {}),
@@ -320,7 +318,7 @@ export class ManualRefreshReconciler {
           ...(typeof entrySlippageBps === "number" ? { entrySlippageBps } : {}),
           ...(typeof exitSlippageBps === "number" ? { exitSlippageBps } : {}),
           ...(typeof roundtripSlippageBps === "number" ? { roundtripSlippageBps } : {}),
-          fundingUsd: asNumber(candidate.fundingFee, 0),
+          fundingUsd,
           account
         })
       : `${symbol} ${reason} confirmed`;

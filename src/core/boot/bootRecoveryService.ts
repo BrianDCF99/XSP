@@ -417,9 +417,11 @@ export class BootRecoveryService {
           const key = `${strategyName}|${normalizeSymbol(event.symbol)}`;
           const openBefore = openBeforeByStrategySymbol.get(key);
           const closedAge = openBefore ? positionAge(openBefore.entryTime, event.eventTime) : undefined;
-          const entryUsd = asNumber(event.notionalUsd, 0);
-          const eventQty = asNumber(event.qty, 0);
-          const exitUsd = eventQty > 0 ? eventQty * asNumber(event.price, 0) : entryUsd;
+          const marginUsd = asNumber(event.marginUsd, 0);
+          const notionalUsd = asNumber(event.notionalUsd, 0);
+          const leverage = asNumber(event.leverage, 0);
+          const entryUsd = marginUsd > 0 ? marginUsd : notionalUsd > 0 && leverage > 0 ? notionalUsd / leverage : 0;
+          const exitUsd = entryUsd + asNumber(event.pnlUsd, 0) + asNumber(event.fundingUsd, 0);
           const text = module.buildExitConfirmedTelegramMessage({
             emoji: this.resolveEmoji(strategyName, module),
             exchange: this.collector.exchangeName.toUpperCase(),
@@ -429,7 +431,7 @@ export class BootRecoveryService {
             reason: event.reason ?? "manual exit",
             ...(typeof closedAge === "string" ? { age: closedAge } : {}),
             ...(entryUsd > 0 ? { entryUsd } : {}),
-            ...(exitUsd > 0 ? { exitUsd } : {}),
+            ...(Number.isFinite(exitUsd) ? { exitUsd } : {}),
             pnlUsd: asNumber(event.pnlUsd, 0),
             pnlPct: asNumber(event.pnlPct, 0),
             ...(typeof event.entrySlippageBps === "number" ? { entrySlippageBps: event.entrySlippageBps } : {}),
