@@ -71,6 +71,7 @@ interface BootStrategyTelegramModule {
     exitUsd?: number;
     pnlUsd: number;
     pnlPct: number;
+    entrySlippageBps?: number;
     exitSlippageBps?: number;
     roundtripSlippageBps?: number;
     fundingUsd: number;
@@ -431,6 +432,7 @@ export class BootRecoveryService {
             ...(exitUsd > 0 ? { exitUsd } : {}),
             pnlUsd: asNumber(event.pnlUsd, 0),
             pnlPct: asNumber(event.pnlPct, 0),
+            ...(typeof event.entrySlippageBps === "number" ? { entrySlippageBps: event.entrySlippageBps } : {}),
             ...(typeof event.exitSlippageBps === "number" ? { exitSlippageBps: event.exitSlippageBps } : {}),
             ...(typeof event.roundtripSlippageBps === "number" ? { roundtripSlippageBps: event.roundtripSlippageBps } : {}),
             fundingUsd: asNumber(event.fundingUsd, 0),

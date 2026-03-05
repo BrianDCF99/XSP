@@ -23,6 +23,7 @@ import {
   defaultAccountState,
   finiteNumber,
   fundingAmount,
+  historyPositionEventTimeIso,
   isOpenPosition,
   isShortPosition,
   mapExpectedEventType,
@@ -268,6 +269,7 @@ export class ManualRefreshReconciler {
     const entrySlippageBps = recentExitContext.entrySlippageBps ?? dbPosition.entrySlippageBps ?? null;
     const exitSlippageBps = calcExitSlippageBps(recentExitContext.expectedExitPrice, exitPrice);
     const roundtripSlippageBps = calcRoundtripSlippageBps(entrySlippageBps, exitSlippageBps);
+    const closeEventTime = historyPositionEventTimeIso(candidate, nowIso());
     const entryUsd =
       Number.isFinite(notionalUsd) && notionalUsd > 0
         ? notionalUsd
@@ -285,7 +287,7 @@ export class ManualRefreshReconciler {
       symbol,
       exchange: this.deps.collector.exchangeName,
       side: "SHORT",
-      eventTime: nowIso(),
+      eventTime: closeEventTime,
       price: exitPrice,
       qty,
       leverage,
@@ -310,11 +312,12 @@ export class ManualRefreshReconciler {
           tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
           symbol,
           reason,
-          age: positionAge(dbPosition.entryTime, nowIso()),
+          age: positionAge(dbPosition.entryTime, closeEventTime),
           entryUsd,
           exitUsd,
           pnlUsd,
           pnlPct,
+          ...(typeof entrySlippageBps === "number" ? { entrySlippageBps } : {}),
           ...(typeof exitSlippageBps === "number" ? { exitSlippageBps } : {}),
           ...(typeof roundtripSlippageBps === "number" ? { roundtripSlippageBps } : {}),
           fundingUsd: asNumber(candidate.fundingFee, 0),

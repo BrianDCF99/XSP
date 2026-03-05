@@ -101,7 +101,7 @@ Exit:  $ExitMargin
 
 PNL: $ | % (Realized pnl including the entry and exit fees slippages and stuff)
 
-Exit(Slippage): x.xx bps | RT(Round trip slippage): x.xx bps
+Ex(Slippage): x.xx | En: x.xx | RT(Round trip slippage): x.xx 
 Funding: $ (could be - to indicate net negative)
 
 

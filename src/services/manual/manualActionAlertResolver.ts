@@ -23,6 +23,7 @@ import {
   calcShortPnlUsd,
   defaultAccountState,
   finiteNumber,
+  historyPositionEventTimeIso,
   mapExpectedEventType,
   normalizeSymbol,
   nowIso,
@@ -601,6 +602,18 @@ export class ManualAlertActionResolver {
   private async resolveExitAlert(alert: ManualAlertRecord, module: StrategyTelegramModule): Promise<AlertActionResult> {
     const payload = alert.payload;
     const symbol = normalizeSymbol(asString(payload.symbol, alert.primarySymbol));
+    const strategyOpen = await this.deps.repos.trades.getOpenPositionsByStrategy(alert.strategyName);
+    const openPosition = strategyOpen.find((position) => normalizeSymbol(position.symbol) === symbol) ?? null;
+
+    // If position is already closed in strategy state, treat stale close confirmations as no-op.
+    // This prevents duplicate EXIT events/messages for the same trade from older alerts.
+    if (!openPosition) {
+      return {
+        resolved: true,
+        events: [],
+        messages: []
+      };
+    }
 
     const openPositions = await this.deps.mexc.getOpenPositions(symbol);
     const stillOpen = openPositions.find(
@@ -666,8 +679,6 @@ export class ManualAlertActionResolver {
 
     const type = mapExpectedEventType(payload.expectedEventType);
     const reason = asString(payload.reasonLabel, alert.reason ?? "Exit");
-    const strategyOpen = await this.deps.repos.trades.getOpenPositionsByStrategy(alert.strategyName);
-    const openPosition = strategyOpen.find((position) => normalizeSymbol(position.symbol) === symbol) ?? null;
     const entrySlippageBps = finiteNumber(payload.entrySlippageBps) ?? openPosition?.entrySlippageBps ?? null;
     const takeProfitPrice = finiteNumber(payload.takeProfitPrice);
     const entrySellRatio = finiteNumber(payload.entrySellRatio);
@@ -675,7 +686,8 @@ export class ManualAlertActionResolver {
     const exitSlippageBps = calcExitSlippageBps(expectedExitPrice, exitPrice);
     const roundtripSlippageBps = calcRoundtripSlippageBps(entrySlippageBps, exitSlippageBps);
     const entryTimeIso = asString(payload.entryTime, openPosition?.entryTime ?? "");
-    const closedAge = entryTimeIso.length > 0 ? positionAge(entryTimeIso, nowIso()) : undefined;
+    const closeEventTime = historyPositionEventTimeIso(candidate, nowIso());
+    const closedAge = entryTimeIso.length > 0 ? positionAge(entryTimeIso, closeEventTime) : undefined;
     const entryUsd =
       Number.isFinite(notionalUsd) && notionalUsd > 0
         ? notionalUsd
@@ -693,7 +705,7 @@ export class ManualAlertActionResolver {
       symbol,
       exchange: this.deps.collector.exchangeName,
       side: "SHORT",
-      eventTime: nowIso(),
+      eventTime: closeEventTime,
       price: exitPrice,
       qty,
       leverage,
@@ -736,6 +748,7 @@ export class ManualAlertActionResolver {
         exitUsd,
         pnlUsd,
         pnlPct,
+        ...(typeof entrySlippageBps === "number" ? { entrySlippageBps } : {}),
         ...(typeof exitSlippageBps === "number" ? { exitSlippageBps } : {}),
         ...(typeof roundtripSlippageBps === "number" ? { roundtripSlippageBps } : {}),
         fundingUsd: asNumber(candidate.fundingFee, 0),

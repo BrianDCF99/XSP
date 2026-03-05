@@ -55,6 +55,12 @@ function fmtBps(value) {
   return `${value.toFixed(2)} bps`;
 }
 
+function fmtSignedBps(value) {
+  if (!Number.isFinite(value)) return "N/A";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)} bps`;
+}
+
 function fmtAge(value) {
   if (typeof value !== "string" || value.length === 0) return "00 - 00:00";
   return value.replace("-", " - ");
@@ -213,7 +219,7 @@ export function buildExitConfirmedTelegramMessage(input) {
     "",
     `PNL: ${fmtSignedUsd(input.pnlUsd)} | ${fmtPct(input.pnlPct)}`,
     "",
-    `Exit: ${fmtBps(input.exitSlippageBps)} | RT: ${fmtBps(input.roundtripSlippageBps)}`,
+    `Ex(Slippage): ${fmtSignedBps(input.exitSlippageBps)} | En: ${fmtSignedBps(input.entrySlippageBps)} | RT(Round trip slippage): ${fmtSignedBps(input.roundtripSlippageBps)}`,
     `Funding: ${fmtSignedUsd(input.fundingUsd ?? 0)}`,
     "",
     "",

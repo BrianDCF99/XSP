@@ -265,6 +265,18 @@ export function pickBestHistoryPosition(history: MexcHistoryPosition[], symbol: 
   return filtered[0] ?? null;
 }
 
+export function historyPositionEventTimeIso(position: MexcHistoryPosition, fallbackIso = nowIso()): string {
+  const toEpochMs = (value: unknown): number | null => {
+    const raw = asNumber(value, 0);
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    return raw < 10_000_000_000 ? raw * 1000 : raw;
+  };
+
+  const ms = toEpochMs(position.updateTime) ?? toEpochMs(position.closeTime) ?? toEpochMs(position.createTime);
+  if (ms === null) return fallbackIso;
+  return new Date(ms).toISOString();
+}
+
 export function defaultAccountState(): AccountState {
   return {
     equityUsd: 0,
