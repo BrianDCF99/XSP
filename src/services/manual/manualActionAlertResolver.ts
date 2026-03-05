@@ -7,7 +7,7 @@ import { Repositories } from "../../db/repos/index.js";
 import { ExchangeAccountState } from "../../exchange/accountStateExtractor.js";
 import { ExchangeCollector } from "../../exchange/exchangeCollector.js";
 import { extractBybitSignalRows } from "../../exchange/signalMarketExtractor.js";
-import { MexcOpenPosition, MexcPrivateClient } from "../../exchange/mexc/mexcPrivateClient.js";
+import { MexcHistoryOrder, MexcOpenPosition, MexcPrivateClient } from "../../exchange/mexc/mexcPrivateClient.js";
 import { TelegramClient } from "../../notifications/telegramClient.js";
 import { ManualAlertButtonAction, PositionEvent, StrategyMessage } from "../../strategies/types.js";
 import { Logger } from "../../utils/logger.js";
@@ -16,24 +16,30 @@ import {
   StrategyTelegramModule,
   asNumber,
   asString,
-  calcExitSlippageBps,
   calcMarginToPutRounded,
   calcRoundtripSlippageBps,
   calcShortPnlPct,
   calcShortPnlUsd,
   defaultAccountState,
   finiteNumber,
+  historyEpochMs,
+  historyOrderEventTimeIso,
   historyPositionEventTimeIso,
   mapExpectedEventType,
   normalizeSymbol,
   nowIso,
+  orderRealizedPrice,
+  orderSlippageBps,
+  pickBestHistoryOrder,
   pickBestHistoryPosition,
-  positiveFiniteNumber,
   positionAge,
   resolveEmoji,
   resolveStrategyLabel,
   shortLiquidationPrice
 } from "./manualActionShared.js";
+
+const MEXC_SIDE_CLOSE_SHORT = 2;
+const MEXC_SIDE_OPEN_SHORT = 3;
 
 interface AlertActionResult {
   resolved: boolean;
@@ -533,6 +539,17 @@ export class ManualAlertActionResolver {
     const qty = asNumber(opened.holdVol, 0);
     const marginUsd = asNumber(opened.im, 0) || asNumber(opened.oim, 0) || asNumber(opened.positionMargin, 0);
     const notionalUsd = asNumber(opened.positionValue, marginUsd * leverage || qty * entryPrice);
+    const lookbackMs = this.deps.cfg.manualExecution.reconcileLookbackMinutes * 60_000;
+    const entryTargetMs = historyEpochMs(opened.createTime) ?? Date.now();
+    const entryOrder = await this.findBestHistoryOrder(
+      symbol,
+      Math.max(0, entryTargetMs - lookbackMs),
+      Date.now(),
+      MEXC_SIDE_OPEN_SHORT,
+      entryTargetMs
+    );
+    const entrySlippageReal = orderSlippageBps(entryOrder ?? undefined);
+    const realizedEntryPrice = orderRealizedPrice(entryOrder ?? undefined) ?? entryPrice;
 
     const tpUnlevered = Math.max(0, asNumber(payload.takeProfitUnlevered, 0));
     const entryFeeBps = asNumber(payload.entryFeeBps, 0);
@@ -542,7 +559,6 @@ export class ManualAlertActionResolver {
     const liquidationPrice = asNumber(opened.liquidatePrice, shortLiquidationPrice(entryPrice, leverage));
 
     const alertPrice = asNumber(payload.priceAtAlert, entryPrice);
-    const entrySlippageReal = alertPrice > 0 ? ((alertPrice - entryPrice) / alertPrice) * 10_000 : 0;
     const entrySellRatio = finiteNumber(payload.entrySellRatio);
 
     const event: PositionEvent = {
@@ -551,8 +567,8 @@ export class ManualAlertActionResolver {
       symbol,
       exchange: this.deps.collector.exchangeName,
       side: "SHORT",
-      eventTime: nowIso(),
-      price: entryPrice,
+      eventTime: entryOrder ? historyOrderEventTimeIso(entryOrder, nowIso()) : nowIso(),
+      price: realizedEntryPrice,
       qty,
       leverage,
       marginUsd,
@@ -560,7 +576,7 @@ export class ManualAlertActionResolver {
       reason: "MANUAL_OPEN_CONFIRMED",
       takeProfitPrice,
       ...(entrySellRatio === null ? {} : { entrySellRatio }),
-      entrySlippageBps: entrySlippageReal
+      ...(typeof entrySlippageReal === "number" ? { entrySlippageBps: entrySlippageReal } : {})
     };
 
     const account = await this.currentAccountState(alert.strategyName);
@@ -584,10 +600,10 @@ export class ManualAlertActionResolver {
         tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
         symbol,
         entryPrice: alertPrice,
-        realizedEntryPrice: entryPrice,
+        realizedEntryPrice,
         takeProfitPrice,
         liquidationPrice,
-        entrySlippageBps: entrySlippageReal,
+        ...(typeof entrySlippageReal === "number" ? { entrySlippageBps: entrySlippageReal } : {}),
         account
       })
     };
@@ -663,7 +679,23 @@ export class ManualAlertActionResolver {
     }
 
     const entryPrice = asNumber(candidate.openAvgPrice, asNumber(payload.entryPrice, 0));
-    const exitPrice = asNumber(candidate.closeAvgPrice, asNumber(payload.currentPrice, 0));
+    const closeEventTime = historyPositionEventTimeIso(candidate, nowIso());
+    const closeEventMs = Date.parse(closeEventTime);
+    const exitOrder = await this.findBestHistoryOrder(
+      symbol,
+      startTime,
+      endTime,
+      MEXC_SIDE_CLOSE_SHORT,
+      Number.isFinite(closeEventMs) ? closeEventMs : undefined
+    );
+    const entryOrder = await this.findBestHistoryOrder(
+      symbol,
+      startTime,
+      endTime,
+      MEXC_SIDE_OPEN_SHORT,
+      entryTimeMs ?? undefined
+    );
+    const exitPrice = orderRealizedPrice(exitOrder) ?? asNumber(candidate.closeAvgPrice, 0);
     const leverage = asNumber(candidate.leverage, asNumber(payload.leverage, 5));
     const qty = asNumber(candidate.closeVol, asNumber(payload.qty, 0));
     const marginUsd = asNumber(candidate.im, 0) || asNumber(candidate.oim, 0) || asNumber(payload.marginUsd, 0);
@@ -680,14 +712,12 @@ export class ManualAlertActionResolver {
 
     const type = mapExpectedEventType(payload.expectedEventType);
     const reason = asString(payload.reasonLabel, alert.reason ?? "Exit");
-    const entrySlippageBps = finiteNumber(payload.entrySlippageBps) ?? openPosition?.entrySlippageBps ?? null;
+    const entrySlippageBps = orderSlippageBps(entryOrder) ?? null;
     const takeProfitPrice = finiteNumber(payload.takeProfitPrice);
     const entrySellRatio = finiteNumber(payload.entrySellRatio);
-    const expectedExitPrice = positiveFiniteNumber(payload.currentPrice);
-    const exitSlippageBps = calcExitSlippageBps(expectedExitPrice, exitPrice);
+    const exitSlippageBps = orderSlippageBps(exitOrder);
     const roundtripSlippageBps = calcRoundtripSlippageBps(entrySlippageBps, exitSlippageBps);
     const entryTimeIso = asString(payload.entryTime, openPosition?.entryTime ?? "");
-    const closeEventTime = historyPositionEventTimeIso(candidate, nowIso());
     const closedAge = entryTimeIso.length > 0 ? positionAge(entryTimeIso, closeEventTime) : undefined;
     const entryUsd =
       Number.isFinite(marginUsd) && marginUsd > 0
@@ -841,6 +871,24 @@ export class ManualAlertActionResolver {
       events: [...closeResult.events, ...entryResult.events],
       messages: [...closeResult.messages, ...entryResult.messages]
     };
+  }
+
+  private async findBestHistoryOrder(
+    symbol: string,
+    startTime: number,
+    endTime: number,
+    side: number,
+    targetTimeMs?: number
+  ): Promise<MexcHistoryOrder | null> {
+    const historyOrders = await this.deps.mexc.getHistoryOrders({
+      symbol,
+      startTime,
+      endTime,
+      pageNum: 1,
+      pageSize: 100
+    });
+
+    return pickBestHistoryOrder(historyOrders, symbol, side, startTime, targetTimeMs);
   }
 
   private isShortOpenPosition(position: MexcOpenPosition): boolean {

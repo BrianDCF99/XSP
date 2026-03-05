@@ -49,6 +49,29 @@ export interface MexcHistoryPosition {
   updateTime?: number | undefined;
 }
 
+export interface MexcHistoryOrder {
+  orderId?: string | undefined;
+  symbol: string;
+  positionId?: number | undefined;
+  state?: number | undefined;
+  side?: number | undefined;
+  category?: number | undefined;
+  openType?: number | undefined;
+  orderType?: number | undefined;
+  vol?: number | undefined;
+  dealVol?: number | undefined;
+  price?: number | undefined;
+  dealAvgPrice?: number | undefined;
+  leverage?: number | undefined;
+  orderMargin?: number | undefined;
+  usedMargin?: number | undefined;
+  takerFee?: number | undefined;
+  makerFee?: number | undefined;
+  profit?: number | undefined;
+  createTime?: number | undefined;
+  updateTime?: number | undefined;
+}
+
 export interface MexcAsset {
   currency?: string | undefined;
   equity?: number | undefined;
@@ -69,6 +92,12 @@ function normalizeNumber(value: unknown): number | undefined {
 
 function normalizeString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function normalizeId(value: unknown): string | undefined {
+  if (typeof value === "string" && value.length > 0) return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
 }
 
 function toQueryString(input: Record<string, string | number | undefined>): string {
@@ -162,6 +191,36 @@ function normalizeHistoryPosition(row: unknown): MexcHistoryPosition | null {
   };
 }
 
+function normalizeHistoryOrder(row: unknown): MexcHistoryOrder | null {
+  if (!row || typeof row !== "object") return null;
+  const obj = row as Record<string, unknown>;
+  const symbol = normalizeString(obj.symbol);
+  if (!symbol) return null;
+
+  return {
+    orderId: normalizeId(obj.orderId ?? obj.id ?? obj.order_id),
+    symbol,
+    positionId: normalizeNumber(obj.positionId),
+    state: normalizeNumber(obj.state),
+    side: normalizeNumber(obj.side),
+    category: normalizeNumber(obj.category),
+    openType: normalizeNumber(obj.openType),
+    orderType: normalizeNumber(obj.orderType),
+    vol: normalizeNumber(obj.vol),
+    dealVol: normalizeNumber(obj.dealVol),
+    price: normalizeNumber(obj.price),
+    dealAvgPrice: normalizeNumber(obj.dealAvgPrice),
+    leverage: normalizeNumber(obj.leverage),
+    orderMargin: normalizeNumber(obj.orderMargin),
+    usedMargin: normalizeNumber(obj.usedMargin),
+    takerFee: normalizeNumber(obj.takerFee),
+    makerFee: normalizeNumber(obj.makerFee),
+    profit: normalizeNumber(obj.profit),
+    createTime: normalizeNumber(obj.createTime),
+    updateTime: normalizeNumber(obj.updateTime)
+  };
+}
+
 function normalizeAsset(row: unknown): MexcAsset | null {
   if (!row || typeof row !== "object") return null;
   const obj = row as Record<string, unknown>;
@@ -223,6 +282,26 @@ export class MexcPrivateClient {
     return rows
       .map((row) => normalizeHistoryPosition(row))
       .filter((row): row is MexcHistoryPosition => row !== null);
+  }
+
+  async getHistoryOrders(input: {
+    symbol?: string;
+    startTime?: number;
+    endTime?: number;
+    pageNum?: number;
+    pageSize?: number;
+  }): Promise<MexcHistoryOrder[]> {
+    const rows = await this.signedGet<unknown[]>("/api/v1/private/order/list/history_orders", {
+      symbol: input.symbol,
+      start_time: input.startTime,
+      end_time: input.endTime,
+      page_num: input.pageNum ?? 1,
+      page_size: input.pageSize ?? 50
+    });
+
+    return rows
+      .map((row) => normalizeHistoryOrder(row))
+      .filter((row): row is MexcHistoryOrder => row !== null);
   }
 
   async getAccountAssets(): Promise<MexcAsset[]> {

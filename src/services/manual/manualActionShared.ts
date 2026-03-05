@@ -2,7 +2,7 @@
  * Shared types and pure helpers for manual action services.
  */
 import { OpenPositionRecord } from "../../db/repos/tradeRepository.js";
-import { MexcAsset, MexcHistoryPosition, MexcOpenPosition } from "../../exchange/mexc/mexcPrivateClient.js";
+import { MexcAsset, MexcHistoryOrder, MexcHistoryPosition, MexcOpenPosition } from "../../exchange/mexc/mexcPrivateClient.js";
 import { PositionEvent } from "../../strategies/types.js";
 
 export interface StrategyTelegramModule {
@@ -43,13 +43,10 @@ export interface FundingDetectedUpdate {
 export interface RecentExitAlertContext {
   type: PositionEvent["type"] | null;
   reason: string | null;
-  expectedExitPrice: number | null;
-  entrySlippageBps: number | null;
 }
 
 export interface RecentEntryAlertContext {
   takeProfitPrice: number | null;
-  entrySlippageBps: number | null;
   entrySellRatio: number | null;
 }
 
@@ -146,6 +143,66 @@ export function calcRoundtripSlippageBps(entrySlippageBps: number | null, exitSl
   return entrySlippageBps + exitSlippageBps;
 }
 
+export function historyEpochMs(value: unknown): number | null {
+  const raw = asNumber(value, 0);
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  return raw < 10_000_000_000 ? raw * 1000 : raw;
+}
+
+function historyPositionEventTimeMs(position: MexcHistoryPosition): number | null {
+  return historyEpochMs(position.updateTime) ?? historyEpochMs(position.closeTime) ?? historyEpochMs(position.createTime);
+}
+
+function historyOrderEventTimeMs(order: MexcHistoryOrder): number | null {
+  return historyEpochMs(order.updateTime) ?? historyEpochMs(order.createTime);
+}
+
+export function orderSlippageBps(order: MexcHistoryOrder | null | undefined): number | undefined {
+  if (!order) return undefined;
+  const expected = positiveFiniteNumber(order.price);
+  const realized = positiveFiniteNumber(order.dealAvgPrice);
+  if (expected === null || realized === null) return undefined;
+  return ((realized - expected) / expected) * 10_000;
+}
+
+export function orderRealizedPrice(order: MexcHistoryOrder | null | undefined): number | undefined {
+  if (!order) return undefined;
+  const realized = positiveFiniteNumber(order.dealAvgPrice);
+  return realized === null ? undefined : realized;
+}
+
+export function pickBestHistoryOrder(
+  history: MexcHistoryOrder[],
+  symbol: string,
+  side: number,
+  minTimeMs: number,
+  targetTimeMs?: number
+): MexcHistoryOrder | null {
+  const target = normalizeSymbol(symbol);
+  const base = history
+    .filter((row) => normalizeSymbol(row.symbol) === target)
+    .filter((row) => asNumber(row.side, 0) === side)
+    .filter((row) => asNumber(row.state, 0) === 3)
+    .filter((row) => asNumber(row.dealVol, 0) > 0)
+    .map((row) => ({ row, timeMs: historyOrderEventTimeMs(row) }))
+    .filter((item) => item.timeMs !== null && item.timeMs >= minTimeMs) as Array<{ row: MexcHistoryOrder; timeMs: number }>;
+
+  if (base.length === 0) return null;
+
+  if (typeof targetTimeMs === "number" && Number.isFinite(targetTimeMs) && targetTimeMs > 0) {
+    base.sort((a, b) => {
+      const aDistance = Math.abs(a.timeMs - targetTimeMs);
+      const bDistance = Math.abs(b.timeMs - targetTimeMs);
+      if (aDistance !== bDistance) return aDistance - bDistance;
+      return b.timeMs - a.timeMs;
+    });
+    return base[0]!.row;
+  }
+
+  base.sort((a, b) => b.timeMs - a.timeMs);
+  return base[0]!.row;
+}
+
 export function mapExpectedEventType(value: unknown): PositionEvent["type"] {
   const raw = typeof value === "string" ? value.toUpperCase() : "";
   if (raw === "LIQUIDATION") return "LIQUIDATION";
@@ -238,27 +295,17 @@ export function accountFromMexc(openPositions: MexcOpenPosition[], assets: MexcA
 }
 
 export function pickBestHistoryPosition(history: MexcHistoryPosition[], symbol: string, minTimeMs: number): MexcHistoryPosition | null {
-  const toEpochMs = (value: unknown): number | null => {
-    const raw = asNumber(value, 0);
-    if (!Number.isFinite(raw) || raw <= 0) return null;
-    return raw < 10_000_000_000 ? raw * 1000 : raw;
-  };
-
-  const eventTimeMs = (row: MexcHistoryPosition): number | null => {
-    return toEpochMs(row.updateTime) ?? toEpochMs(row.closeTime) ?? toEpochMs(row.createTime);
-  };
-
   const filtered = history
     .filter((row) => normalizeSymbol(row.symbol) === symbol)
     .filter((row) => isShortPosition(row))
     .filter((row) => asNumber(row.closeVol, 0) > 0)
     .filter((row) => {
-      const timeMs = eventTimeMs(row);
+      const timeMs = historyPositionEventTimeMs(row);
       return timeMs !== null && timeMs >= minTimeMs;
     })
     .sort((a, b) => {
-      const aMs = eventTimeMs(a) ?? 0;
-      const bMs = eventTimeMs(b) ?? 0;
+      const aMs = historyPositionEventTimeMs(a) ?? 0;
+      const bMs = historyPositionEventTimeMs(b) ?? 0;
       return bMs - aMs;
     });
 
@@ -266,13 +313,13 @@ export function pickBestHistoryPosition(history: MexcHistoryPosition[], symbol: 
 }
 
 export function historyPositionEventTimeIso(position: MexcHistoryPosition, fallbackIso = nowIso()): string {
-  const toEpochMs = (value: unknown): number | null => {
-    const raw = asNumber(value, 0);
-    if (!Number.isFinite(raw) || raw <= 0) return null;
-    return raw < 10_000_000_000 ? raw * 1000 : raw;
-  };
+  const ms = historyPositionEventTimeMs(position);
+  if (ms === null) return fallbackIso;
+  return new Date(ms).toISOString();
+}
 
-  const ms = toEpochMs(position.updateTime) ?? toEpochMs(position.closeTime) ?? toEpochMs(position.createTime);
+export function historyOrderEventTimeIso(order: MexcHistoryOrder, fallbackIso = nowIso()): string {
+  const ms = historyOrderEventTimeMs(order);
   if (ms === null) return fallbackIso;
   return new Date(ms).toISOString();
 }

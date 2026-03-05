@@ -6,7 +6,7 @@ import { Repositories } from "../../db/repos/index.js";
 import { OpenPositionRecord } from "../../db/repos/tradeRepository.js";
 import { ExchangeAccountState } from "../../exchange/accountStateExtractor.js";
 import { ExchangeCollector } from "../../exchange/exchangeCollector.js";
-import { MexcOpenPosition, MexcPrivateClient } from "../../exchange/mexc/mexcPrivateClient.js";
+import { MexcHistoryOrder, MexcOpenPosition, MexcPrivateClient } from "../../exchange/mexc/mexcPrivateClient.js";
 import { BybitSignalRow, extractBybitSignalRows } from "../../exchange/signalMarketExtractor.js";
 import { PositionEvent, StrategyMessage } from "../../strategies/types.js";
 import {
@@ -17,26 +17,32 @@ import {
   StrategyTelegramModule,
   asNumber,
   asString,
-  calcExitSlippageBps,
   calcRoundtripSlippageBps,
   calcShortPnlPct,
   defaultAccountState,
   finiteNumber,
   fundingAmount,
+  historyEpochMs,
+  historyOrderEventTimeIso,
   historyPositionEventTimeIso,
   isOpenPosition,
   isShortPosition,
   mapExpectedEventType,
   normalizeSymbol,
   nowIso,
+  orderRealizedPrice,
+  orderSlippageBps,
+  pickBestHistoryOrder,
   pickBestHistoryPosition,
   positionAge,
-  positiveFiniteNumber,
   resolveEmoji,
   resolveStrategyLabel,
   sameFunding,
   shortLiquidationPrice
 } from "./manualActionShared.js";
+
+const MEXC_SIDE_CLOSE_SHORT = 2;
+const MEXC_SIDE_OPEN_SHORT = 3;
 
 interface ManualRefreshReconcilerDeps {
   cfg: RuntimeConfig;
@@ -256,7 +262,23 @@ export class ManualRefreshReconciler {
     if (!candidate) return null;
 
     const entryPrice = asNumber(candidate.openAvgPrice, dbPosition.entryPrice);
-    const exitPrice = asNumber(candidate.closeAvgPrice, entryPrice);
+    const closeEventTime = historyPositionEventTimeIso(candidate, nowIso());
+    const closeEventMs = Date.parse(closeEventTime);
+    const exitOrder = await this.findBestHistoryOrder(
+      symbol,
+      startTime,
+      endTime,
+      MEXC_SIDE_CLOSE_SHORT,
+      Number.isFinite(closeEventMs) ? closeEventMs : undefined
+    );
+    const entryOrder = await this.findBestHistoryOrder(
+      symbol,
+      startTime,
+      endTime,
+      MEXC_SIDE_OPEN_SHORT,
+      Date.parse(dbPosition.entryTime)
+    );
+    const exitPrice = orderRealizedPrice(exitOrder) ?? asNumber(candidate.closeAvgPrice, 0);
     const leverage = asNumber(candidate.leverage, dbPosition.leverage);
     const qty = asNumber(candidate.closeVol, dbPosition.qty);
     const marginUsd = asNumber(candidate.im, 0) || asNumber(candidate.oim, 0) || dbPosition.marginUsd;
@@ -267,10 +289,9 @@ export class ManualRefreshReconciler {
     const recentExitContext = await this.resolveRecentExitAlertContext(strategyName, symbol);
     const eventType = recentExitContext.type ?? "EXIT";
     const reason = recentExitContext.reason ?? "manual exit";
-    const entrySlippageBps = recentExitContext.entrySlippageBps ?? dbPosition.entrySlippageBps ?? null;
-    const exitSlippageBps = calcExitSlippageBps(recentExitContext.expectedExitPrice, exitPrice);
+    const entrySlippageBps = orderSlippageBps(entryOrder) ?? null;
+    const exitSlippageBps = orderSlippageBps(exitOrder);
     const roundtripSlippageBps = calcRoundtripSlippageBps(entrySlippageBps, exitSlippageBps);
-    const closeEventTime = historyPositionEventTimeIso(candidate, nowIso());
     const entryUsd =
       Number.isFinite(marginUsd) && marginUsd > 0
         ? marginUsd
@@ -348,6 +369,17 @@ export class ManualRefreshReconciler {
     const notionalUsd = asNumber(mexcPosition.positionValue, marginUsd * leverage);
 
     const entryContext = await this.resolveRecentEntryAlertContext(strategyName, symbol, entryPrice);
+    const lookbackMs = this.deps.cfg.manualExecution.reconcileLookbackMinutes * 60_000;
+    const entryTargetMs = historyEpochMs(mexcPosition.createTime) ?? Date.now();
+    const entryOrder = await this.findBestHistoryOrder(
+      symbol,
+      Math.max(0, entryTargetMs - lookbackMs),
+      Date.now(),
+      MEXC_SIDE_OPEN_SHORT,
+      entryTargetMs
+    );
+    const entrySlippageBps = orderSlippageBps(entryOrder);
+    const realizedEntryPrice = orderRealizedPrice(entryOrder) ?? entryPrice;
     const takeProfitPrice = entryContext.takeProfitPrice;
     const liquidationPrice = asNumber(mexcPosition.liquidatePrice, shortLiquidationPrice(entryPrice, leverage));
 
@@ -357,8 +389,8 @@ export class ManualRefreshReconciler {
       symbol,
       exchange: this.deps.collector.exchangeName,
       side: "SHORT",
-      eventTime: nowIso(),
-      price: entryPrice,
+      eventTime: entryOrder ? historyOrderEventTimeIso(entryOrder, nowIso()) : nowIso(),
+      price: realizedEntryPrice,
       qty,
       leverage,
       marginUsd,
@@ -366,7 +398,7 @@ export class ManualRefreshReconciler {
       reason: "manual entry",
       ...(takeProfitPrice === null ? {} : { takeProfitPrice }),
       ...(entryContext.entrySellRatio === null ? {} : { entrySellRatio: entryContext.entrySellRatio }),
-      ...(entryContext.entrySlippageBps === null ? {} : { entrySlippageBps: entryContext.entrySlippageBps })
+      ...(typeof entrySlippageBps === "number" ? { entrySlippageBps } : {})
     };
 
     const text = module.buildEntryConfirmedTelegramMessage
@@ -377,10 +409,10 @@ export class ManualRefreshReconciler {
           tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
           symbol,
           entryPrice,
-          realizedEntryPrice: entryPrice,
+          realizedEntryPrice,
           ...(takeProfitPrice === null ? {} : { takeProfitPrice }),
           liquidationPrice,
-          ...(entryContext.entrySlippageBps === null ? {} : { entrySlippageBps: entryContext.entrySlippageBps }),
+          ...(typeof entrySlippageBps === "number" ? { entrySlippageBps } : {}),
           account
         })
       : `${symbol} manual entry confirmed`;
@@ -408,27 +440,21 @@ export class ManualRefreshReconciler {
         const reasonText = asString(alert.payload.reasonLabel, alert.reason ?? "");
         return {
           type: mapExpectedEventType(alert.payload.expectedEventType),
-          reason: reasonText.length > 0 ? reasonText : null,
-          expectedExitPrice: positiveFiniteNumber(alert.payload.currentPrice),
-          entrySlippageBps: finiteNumber(alert.payload.entrySlippageBps)
+          reason: reasonText.length > 0 ? reasonText : null
         };
       }
 
       if (alert.kind === "REPLACEMENT_AVAILABLE" && normalizeSymbol(alert.secondarySymbol ?? "") === targetSymbol) {
         return {
           type: "REPLACE",
-          reason: "Replacement",
-          expectedExitPrice: positiveFiniteNumber(alert.payload.loserCurrentPrice),
-          entrySlippageBps: finiteNumber(alert.payload.loserEntrySlippageBps ?? alert.payload.entrySlippageBps)
+          reason: "Replacement"
         };
       }
     }
 
     return {
       type: null,
-      reason: null,
-      expectedExitPrice: null,
-      entrySlippageBps: null
+      reason: null
     };
   }
 
@@ -440,7 +466,6 @@ export class ManualRefreshReconciler {
     if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
       return {
         takeProfitPrice: null,
-        entrySlippageBps: null,
         entrySellRatio: null
       };
     }
@@ -465,19 +490,14 @@ export class ManualRefreshReconciler {
       const expectedEntrySlippageBps = finiteNumber(alert.payload.entrySlippageBps) ?? 0;
       const takeProfitPrice = entryPrice * (1 - (takeProfitUnlevered + (entryFeeBps + expectedEntrySlippageBps) / 10_000));
 
-      const alertPrice = positiveFiniteNumber(alert.payload.priceAtAlert ?? alert.payload.newPriceAtAlert ?? alert.payload.entryPrice);
-      const entrySlippageBps = alertPrice === null ? null : ((alertPrice - entryPrice) / alertPrice) * 10_000;
-
       return {
         takeProfitPrice,
-        entrySlippageBps,
         entrySellRatio: finiteNumber(alert.payload.entrySellRatio)
       };
     }
 
     return {
       takeProfitPrice: null,
-      entrySlippageBps: null,
       entrySellRatio: null
     };
   }
@@ -582,6 +602,24 @@ export class ManualRefreshReconciler {
     } catch {
       return new Map();
     }
+  }
+
+  private async findBestHistoryOrder(
+    symbol: string,
+    startTime: number,
+    endTime: number,
+    side: number,
+    targetTimeMs?: number
+  ): Promise<MexcHistoryOrder | null> {
+    const historyOrders = await this.deps.mexc.getHistoryOrders({
+      symbol,
+      startTime,
+      endTime,
+      pageNum: 1,
+      pageSize: 100
+    });
+
+    return pickBestHistoryOrder(historyOrders, symbol, side, startTime, targetTimeMs);
   }
 
   private async currentAccountState(strategyName: string): Promise<AccountState> {

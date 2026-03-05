@@ -12,7 +12,15 @@ import { extractBybitPriceMapByMexcSymbol } from "../../exchange/signalMarketExt
 import { FuturesSnapshot } from "../../exchange/types.js";
 import { TelegramClient } from "../../notifications/telegramClient.js";
 import { buildStatusPayload } from "../../services/telegram/statusPayloadBuilder.js";
-import { accountFromMexc, positionAge } from "../../services/manual/manualActionShared.js";
+import {
+  accountFromMexc,
+  calcRoundtripSlippageBps,
+  historyPositionEventTimeIso,
+  normalizeSymbol,
+  orderSlippageBps,
+  pickBestHistoryOrder,
+  positionAge
+} from "../../services/manual/manualActionShared.js";
 import { StrategyDescriptor } from "../../strategies/types.js";
 import { PositionEvent } from "../../strategies/types.js";
 import { Logger } from "../../utils/logger.js";
@@ -20,6 +28,9 @@ import { nowIso } from "../../utils/time.js";
 import { buildBootCloseEvent } from "./bootEventBuilder.js";
 import { evaluateBootExit } from "./bootExitEvaluator.js";
 import { extractPriceMap } from "./priceMapExtractor.js";
+
+const MEXC_SIDE_CLOSE_SHORT = 2;
+const MEXC_SIDE_OPEN_SHORT = 3;
 
 interface BootStrategyTelegramModule {
   STRATEGY_LABEL?: string;
@@ -99,10 +110,6 @@ function isOpenPosition(position: { holdVol?: number | undefined }): boolean {
   return asNumber(position.holdVol, 0) > 0;
 }
 
-function normalizeSymbol(value: string): string {
-  return value.trim().toUpperCase();
-}
-
 function toEpochMs(value: unknown): number {
   const raw = asNumber(value, Date.now());
   if (raw <= 0) return Date.now();
@@ -123,29 +130,6 @@ function shortLiquidationPrice(entryPrice: number, leverage: number): number {
   return entryPrice * (1 + 1 / leverage);
 }
 
-function finiteNumber(value: unknown): number | null {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function positiveFiniteNumber(value: unknown): number | null {
-  const n = finiteNumber(value);
-  if (n === null || n <= 0) return null;
-  return n;
-}
-
-function calcExitSlippageBps(expectedPrice: number | null, realizedPrice: number): number | undefined {
-  if (expectedPrice === null) return undefined;
-  if (!Number.isFinite(realizedPrice) || realizedPrice <= 0) return undefined;
-  return ((realizedPrice - expectedPrice) / expectedPrice) * 10_000;
-}
-
-function calcRoundtripSlippageBps(entrySlippageBps: number | null, exitSlippageBps: number | undefined): number | undefined {
-  if (entrySlippageBps === null) return undefined;
-  if (typeof exitSlippageBps !== "number" || !Number.isFinite(exitSlippageBps)) return undefined;
-  return entrySlippageBps + exitSlippageBps;
-}
-
 function pickBestHistoryPosition(history: MexcHistoryPosition[], symbol: string, minTimeMs: number): MexcHistoryPosition | null {
   const target = normalizeSymbol(symbol);
   const filtered = history
@@ -159,8 +143,8 @@ function pickBestHistoryPosition(history: MexcHistoryPosition[], symbol: string,
 }
 
 interface BootExitPricingContext {
-  expectedExitPrice: number | null;
   entrySlippageBps: number | null;
+  exitSlippageBps: number | undefined;
 }
 
 export class BootRecoveryService {
@@ -278,33 +262,41 @@ export class BootRecoveryService {
     position: OpenPositionRecord,
     candidate: MexcHistoryPosition
   ): Promise<BootExitPricingContext> {
-    const symbol = normalizeSymbol(position.symbol);
-    const closeTimeMs = toEpochMs(candidate.updateTime);
-    const recentMinutes = Math.max(60, this.cfg.manualExecution.reconcileLookbackMinutes * 3);
-    const recentAlerts = await this.repos.manualAlerts.listRecentByStrategy(position.strategyName, recentMinutes);
-    const matched = recentAlerts
-      .filter((alert) => alert.kind === "EXIT_AVAILABLE" && normalizeSymbol(alert.primarySymbol) === symbol)
-      .map((alert) => {
-        const createdAtMs = Date.parse(alert.createdAt);
-        const distanceMs = Number.isFinite(createdAtMs) ? Math.abs(createdAtMs - closeTimeMs) : Number.POSITIVE_INFINITY;
-        return { alert, distanceMs };
-      })
-      .sort((a, b) => a.distanceMs - b.distanceMs)[0]?.alert;
-
-    if (!matched) {
+    if (!this.mexcPrivate) {
       return {
-        expectedExitPrice: null,
-        entrySlippageBps: position.entrySlippageBps
+        entrySlippageBps: null,
+        exitSlippageBps: undefined
       };
     }
 
-    const payload = matched.payload ?? {};
-    const expectedExitPrice = positiveFiniteNumber((payload as Record<string, unknown>).currentPrice);
-    const entrySlippageBps = finiteNumber((payload as Record<string, unknown>).entrySlippageBps) ?? position.entrySlippageBps;
+    const closeEventTimeIso = historyPositionEventTimeIso(candidate, nowIso());
+    const closeEventMs = Date.parse(closeEventTimeIso);
+    const entryFloorMs = Math.max(0, Date.parse(position.entryTime) - 60_000);
+    const historyOrders = await this.mexcPrivate.getHistoryOrders({
+      symbol: position.symbol,
+      startTime: entryFloorMs,
+      endTime: Date.now(),
+      pageNum: 1,
+      pageSize: 100
+    });
+    const entryOrder = pickBestHistoryOrder(
+      historyOrders,
+      position.symbol,
+      MEXC_SIDE_OPEN_SHORT,
+      entryFloorMs,
+      Date.parse(position.entryTime)
+    );
+    const closeOrder = pickBestHistoryOrder(
+      historyOrders,
+      position.symbol,
+      MEXC_SIDE_CLOSE_SHORT,
+      entryFloorMs,
+      Number.isFinite(closeEventMs) ? closeEventMs : undefined
+    );
 
     return {
-      expectedExitPrice,
-      entrySlippageBps
+      entrySlippageBps: orderSlippageBps(entryOrder) ?? null,
+      exitSlippageBps: orderSlippageBps(closeOrder)
     };
   }
 
@@ -334,9 +326,9 @@ export class BootRecoveryService {
 
     const type: PositionEvent["type"] = isLiq ? "LIQUIDATION" : "EXIT";
     const reason = isLiq ? "Liquidation" : isTp ? "Take Profit" : "manual exit";
-    const eventTime = new Date(toEpochMs(candidate.updateTime)).toISOString();
+    const eventTime = historyPositionEventTimeIso(candidate, nowIso());
     const entrySlippageBps = pricingContext.entrySlippageBps;
-    const exitSlippageBps = calcExitSlippageBps(pricingContext.expectedExitPrice, exitPrice);
+    const exitSlippageBps = pricingContext.exitSlippageBps;
     const roundtripSlippageBps = calcRoundtripSlippageBps(entrySlippageBps, exitSlippageBps);
 
     return {
