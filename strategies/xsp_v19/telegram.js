@@ -318,7 +318,7 @@ export function buildStrategyStatusTelegramMessage(input) {
     `U-PNL: ${fmtPct(input.live.unrealizedPnlPct)} | ${fmtSignedUsd(input.live.unrealizedPnlUsd, false)}`,
     "",
     `Entries: ${input.live.entries} | O: ${input.live.openTrades} | M: ${input.live.missed}`,
-    `Winners: ${input.live.winners} | Losers: ${input.live.losers}  |  (${fmtPct(input.live.winPct)})`,
+    `Winners: ${input.live.winners} | Losers: ${input.live.losers}  |  ${fmtPct(input.live.winPct)}`,
     `Replaced: ${input.live.replaced} | Liq'd: ${input.live.liquidations}`,
     "",
     `Eq: ${fmtUsd(input.live.equityUsd)} | Cash: ${fmtUsd(input.live.cashUsd)}`,
