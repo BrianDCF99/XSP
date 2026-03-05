@@ -292,6 +292,8 @@ export class TelegramCommandService {
   private async runManualMaintenance(): Promise<void> {
     if (!this.cfg.manualExecution.enabled) return;
 
+    await this.manualActionProcessor.syncTakeProfitsIfDue();
+    await this.manualActionProcessor.pollAutoConfirmExitAlerts();
     await this.manualActionProcessor.runAutoRefreshIfDue();
 
     const nowMs = Date.now();

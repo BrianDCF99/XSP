@@ -80,6 +80,20 @@ export interface MexcAsset {
   unrealized?: number | undefined;
 }
 
+export interface MexcStopOrder {
+  id?: number | undefined;
+  orderId?: string | undefined;
+  placeOrderId?: string | undefined;
+  symbol: string;
+  positionId?: number | undefined;
+  state?: number | undefined;
+  isFinished?: number | undefined;
+  takeProfitPrice?: number | undefined;
+  stopLossPrice?: number | undefined;
+  createTime?: number | undefined;
+  updateTime?: number | undefined;
+}
+
 interface CachedContractSize {
   contractSize: number;
   expiresAt: number;
@@ -234,6 +248,27 @@ function normalizeAsset(row: unknown): MexcAsset | null {
   };
 }
 
+function normalizeStopOrder(row: unknown): MexcStopOrder | null {
+  if (!row || typeof row !== "object") return null;
+  const obj = row as Record<string, unknown>;
+  const symbol = normalizeString(obj.symbol);
+  if (!symbol) return null;
+
+  return {
+    id: normalizeNumber(obj.id),
+    orderId: normalizeId(obj.orderId ?? obj.order_id),
+    placeOrderId: normalizeId(obj.placeOrderId ?? obj.place_order_id),
+    symbol,
+    positionId: normalizeNumber(obj.positionId),
+    state: normalizeNumber(obj.state),
+    isFinished: normalizeNumber(obj.isFinished),
+    takeProfitPrice: normalizeNumber(obj.takeProfitPrice),
+    stopLossPrice: normalizeNumber(obj.stopLossPrice),
+    createTime: normalizeNumber(obj.createTime),
+    updateTime: normalizeNumber(obj.updateTime)
+  };
+}
+
 export class MexcPrivateClient {
   private readonly baseUrl: string;
   private readonly recvWindowMs: number;
@@ -310,6 +345,16 @@ export class MexcPrivateClient {
     return rows
       .map((row) => normalizeAsset(row))
       .filter((row): row is MexcAsset => row !== null);
+  }
+
+  async getStopOrders(symbol?: string): Promise<MexcStopOrder[]> {
+    const rows = await this.signedGet<unknown[]>("/api/v1/private/stoporder/list/orders", {
+      symbol
+    });
+
+    return rows
+      .map((row) => normalizeStopOrder(row))
+      .filter((row): row is MexcStopOrder => row !== null);
   }
 
   private async hydrateMissingPositionValues(positions: MexcOpenPosition[]): Promise<void> {

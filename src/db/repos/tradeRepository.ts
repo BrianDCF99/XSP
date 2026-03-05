@@ -267,6 +267,25 @@ export class TradeRepository {
     }
   }
 
+  async updateOpenPositionTakeProfitPrice(strategyName: string, symbol: string, takeProfitPrice: number): Promise<void> {
+    if (!this.db) return;
+
+    if (!Number.isFinite(takeProfitPrice) || takeProfitPrice <= 0) return;
+
+    const { error } = await this.db
+      .from("positions")
+      .update({
+        take_profit_price: takeProfitPrice
+      })
+      .eq("strategy_name", strategyName)
+      .eq("symbol", symbol)
+      .eq("status", "OPEN");
+
+    if (error) {
+      throw new Error(`Failed to update positions take_profit_price: ${error.message}`);
+    }
+  }
+
   private mapOpenPositionRows(rows: any[]): OpenPositionRecord[] {
     return rows.map((row) => ({
       id: String(row.id),

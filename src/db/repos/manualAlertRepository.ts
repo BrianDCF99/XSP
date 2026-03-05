@@ -216,6 +216,43 @@ export class ManualAlertRepository {
     }));
   }
 
+  async listPending(limit = 100): Promise<ManualAlertRecord[]> {
+    if (!this.db) return [];
+
+    const { data, error } = await this.db
+      .from("manual_alerts")
+      .select(
+        "id,cycle_run_id,strategy_name,kind,primary_symbol,secondary_symbol,reason,status,requested_action,payload,telegram_message_id,attempts,last_error,created_at,updated_at,last_checked_at,confirmed_at"
+      )
+      .eq("status", "PENDING")
+      .order("created_at", { ascending: true })
+      .limit(limit);
+
+    if (error) {
+      throw new Error(`Failed to query pending manual_alerts: ${error.message}`);
+    }
+
+    return (data ?? []).map((row) => ({
+      id: String(row.id),
+      cycleRunId: row.cycle_run_id ? String(row.cycle_run_id) : null,
+      strategyName: String(row.strategy_name),
+      kind: String(row.kind) as ManualAlertKind,
+      primarySymbol: String(row.primary_symbol),
+      secondarySymbol: row.secondary_symbol ? String(row.secondary_symbol) : null,
+      reason: row.reason ? String(row.reason) : null,
+      status: String(row.status),
+      requestedAction: row.requested_action ? (String(row.requested_action) as ManualAlertButtonAction) : null,
+      payload: (row.payload ?? {}) as Record<string, unknown>,
+      telegramMessageId: row.telegram_message_id === null ? null : Number(row.telegram_message_id),
+      attempts: Number(row.attempts ?? 0),
+      lastError: row.last_error ? String(row.last_error) : null,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+      lastCheckedAt: row.last_checked_at ? String(row.last_checked_at) : null,
+      confirmedAt: row.confirmed_at ? String(row.confirmed_at) : null
+    }));
+  }
+
   async listRecentByStrategy(strategyName: string, minutesLookback: number): Promise<ManualAlertRecord[]> {
     if (!this.db) return [];
 

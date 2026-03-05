@@ -6,7 +6,7 @@ import { Repositories } from "../../db/repos/index.js";
 import { OpenPositionRecord } from "../../db/repos/tradeRepository.js";
 import { ExchangeAccountState } from "../../exchange/accountStateExtractor.js";
 import { ExchangeCollector } from "../../exchange/exchangeCollector.js";
-import { MexcHistoryOrder, MexcOpenPosition, MexcPrivateClient } from "../../exchange/mexc/mexcPrivateClient.js";
+import { MexcHistoryOrder, MexcOpenPosition, MexcPrivateClient, MexcStopOrder } from "../../exchange/mexc/mexcPrivateClient.js";
 import { BybitSignalRow, extractBybitSignalRows } from "../../exchange/signalMarketExtractor.js";
 import { PositionEvent, StrategyMessage } from "../../strategies/types.js";
 import {
@@ -43,6 +43,7 @@ import {
 
 const MEXC_SIDE_CLOSE_SHORT = 2;
 const MEXC_SIDE_OPEN_SHORT = 3;
+const MEXC_STOP_ACTIVE_STATE = 1;
 
 interface ManualRefreshReconcilerDeps {
   cfg: RuntimeConfig;
@@ -62,10 +63,55 @@ type SignalRowByMexcSymbol = Map<string, BybitSignalRow>;
 export class ManualRefreshReconciler {
   constructor(private readonly deps: ManualRefreshReconcilerDeps) {}
 
+  async syncStrategyTakeProfits(strategyName: string): Promise<number> {
+    const dbOpen = await this.deps.repos.trades.getOpenPositionsByStrategy(strategyName);
+    if (dbOpen.length === 0) return 0;
+
+    const stopOrders = await this.deps.mexc.getStopOrders();
+    const bySymbol = new Map<string, MexcStopOrder>();
+
+    for (const order of stopOrders) {
+      if (!this.isActiveStopOrder(order)) continue;
+      const tp = asNumber(order.takeProfitPrice, 0);
+      if (!Number.isFinite(tp) || tp <= 0) continue;
+
+      const symbol = normalizeSymbol(order.symbol);
+      const current = bySymbol.get(symbol);
+      const currentUpdate = asNumber(current?.updateTime, 0);
+      const candidateUpdate = asNumber(order.updateTime, 0);
+      if (!current || candidateUpdate >= currentUpdate) {
+        bySymbol.set(symbol, order);
+      }
+    }
+
+    let updated = 0;
+    for (const position of dbOpen) {
+      const order = bySymbol.get(normalizeSymbol(position.symbol));
+      if (!order) continue;
+
+      const tp = asNumber(order.takeProfitPrice, 0);
+      if (!Number.isFinite(tp) || tp <= 0) continue;
+
+      const currentTp = asNumber(position.takeProfitPrice, 0);
+      if (currentTp > 0 && Math.abs(currentTp - tp) < 0.00000001) continue;
+
+      await this.deps.repos.trades.updateOpenPositionTakeProfitPrice(strategyName, position.symbol, tp);
+      updated += 1;
+    }
+
+    return updated;
+  }
+
   async reconcileStrategy(
     strategyName: string,
     module: StrategyTelegramModule
   ): Promise<{ messages: StrategyMessage[]; events: PositionEvent[] }> {
+    try {
+      await this.syncStrategyTakeProfits(strategyName);
+    } catch {
+      // Best effort TP sync; reconciliation should continue even if stop-order fetch is unavailable.
+    }
+
     const events: PositionEvent[] = [];
     const messages: StrategyMessage[] = [];
 
@@ -592,6 +638,14 @@ export class ManualRefreshReconciler {
     };
 
     return { allowEntry: false, message };
+  }
+
+  private isActiveStopOrder(order: MexcStopOrder): boolean {
+    const isFinished = asNumber(order.isFinished, 0);
+    const state = asNumber(order.state, 0);
+    if (isFinished === 1) return false;
+    if (state !== MEXC_STOP_ACTIVE_STATE) return false;
+    return true;
   }
 
   private async loadSignalRowsByMexcSymbol(): Promise<SignalRowByMexcSymbol> {

@@ -194,6 +194,11 @@ function createExitAvailableMessage(input, position, market, reason) {
     exitSlippageBps: EXIT_SLIPPAGE_BPS
   };
 
+  const exitButtons =
+    reason.code === "TP" || reason.code === "LIQUIDATION"
+      ? ["REFRESH"]
+      : ["CLOSED", "REFRESH"];
+
   return {
     type: "EXIT",
     symbol: position.symbol,
@@ -219,7 +224,7 @@ function createExitAvailableMessage(input, position, market, reason) {
       primarySymbol: position.symbol,
       reason: reason.label,
       payload,
-      buttons: ["CLOSED", "REFRESH"]
+      buttons: exitButtons
     }
   };
 }

@@ -4,6 +4,7 @@
 import { pathToFileURL } from "node:url";
 import { RuntimeConfig } from "../../config/schema.js";
 import { Repositories } from "../../db/repos/index.js";
+import { ManualAlertRecord } from "../../db/repos/manualAlertRepository.js";
 import { ExchangeAccountState } from "../../exchange/accountStateExtractor.js";
 import { ExchangeCollector } from "../../exchange/exchangeCollector.js";
 import { MexcPrivateClient } from "../../exchange/mexc/mexcPrivateClient.js";
@@ -26,6 +27,7 @@ export class ManualActionProcessor {
   private readonly alertResolver: ManualAlertActionResolver;
   private readonly refreshReconciler: ManualRefreshReconciler;
   private nextAutoRefreshAtMs = 0;
+  private nextTakeProfitSyncAtMs = 0;
 
   constructor(
     private readonly cfg: RuntimeConfig,
@@ -34,7 +36,7 @@ export class ManualActionProcessor {
     private readonly telegram: TelegramClient,
     messageDispatcher: MessageDispatcher,
     manualAlertService: ManualAlertService,
-    _logger: Logger,
+    private readonly logger: Logger,
     private readonly strategies: StrategyDescriptor[]
   ) {
     this.mexc = new MexcPrivateClient(cfg);
@@ -43,7 +45,7 @@ export class ManualActionProcessor {
       repos,
       messageDispatcher,
       manualAlertService,
-      logger: _logger,
+      logger: this.logger,
       fetchLiveExchangeAccountState: () => this.fetchLiveExchangeAccountState(),
       strictLiveAccount: cfg.manualExecution.enabled && collector.exchangeName.toLowerCase() === "mexc"
     });
@@ -54,7 +56,7 @@ export class ManualActionProcessor {
       collector,
       mexc: this.mexc,
       telegram,
-      logger: _logger,
+      logger: this.logger,
       getModule: (strategyName) => this.getModule(strategyName),
       publish: (strategyName, messages, events, exchangeRunLabel) =>
         this.publisher.publish(strategyName, messages, events, exchangeRunLabel),
@@ -70,6 +72,7 @@ export class ManualActionProcessor {
     });
 
     this.nextAutoRefreshAtMs = Date.now() + cfg.manualExecution.autoRefreshMinutes * 60_000;
+    this.nextTakeProfitSyncAtMs = Date.now();
   }
 
   async start(): Promise<void> {
@@ -131,6 +134,35 @@ export class ManualActionProcessor {
     for (const alert of waiting) {
       if (!alert.requestedAction) continue;
       await this.alertResolver.resolveAlertAction(alert, alert.requestedAction, false);
+    }
+  }
+
+  async syncTakeProfitsIfDue(): Promise<void> {
+    if (!this.cfg.manualExecution.enabled) return;
+
+    const nowMs = Date.now();
+    if (nowMs < this.nextTakeProfitSyncAtMs) return;
+    this.nextTakeProfitSyncAtMs = nowMs + 60_000;
+
+    for (const strategy of this.strategies) {
+      try {
+        await this.refreshReconciler.syncStrategyTakeProfits(strategy.name);
+      } catch (error) {
+        this.logger.warn("manual TP sync failed", {
+          strategy: strategy.name,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  }
+
+  async pollAutoConfirmExitAlerts(): Promise<void> {
+    if (!this.cfg.manualExecution.enabled) return;
+
+    const pending = await this.repos.manualAlerts.listPending(200);
+    for (const alert of pending) {
+      if (!this.shouldAutoConfirmExitAlert(alert)) continue;
+      await this.alertResolver.resolveAlertAction(alert, "CLOSED", false);
     }
   }
 
@@ -202,5 +234,17 @@ export class ManualActionProcessor {
     const loaded = (await import(moduleUrl)) as StrategyTelegramModule;
     this.moduleByStrategy.set(strategyName, loaded);
     return loaded;
+  }
+
+  private shouldAutoConfirmExitAlert(alert: ManualAlertRecord): boolean {
+    if (alert.kind !== "EXIT_AVAILABLE") return false;
+    const payload = alert.payload ?? {};
+    const reasonCode = String(payload.reasonCode ?? "").trim().toUpperCase();
+    const expectedType = String(payload.expectedEventType ?? "").trim().toUpperCase();
+    const reasonLabel = String(payload.reasonLabel ?? alert.reason ?? "").trim().toUpperCase();
+    if (reasonCode === "TP" || reasonCode === "LIQUIDATION") return true;
+    if (expectedType === "LIQUIDATION") return true;
+    if (reasonLabel === "TAKE PROFIT" || reasonLabel === "LIQUIDATION") return true;
+    return false;
   }
 }
