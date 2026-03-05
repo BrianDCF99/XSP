@@ -29,6 +29,7 @@ import {
   normalizeSymbol,
   nowIso,
   pickBestHistoryPosition,
+  positionAge,
   positiveFiniteNumber,
   resolveEmoji,
   resolveStrategyLabel,
@@ -267,6 +268,16 @@ export class ManualRefreshReconciler {
     const entrySlippageBps = recentExitContext.entrySlippageBps ?? dbPosition.entrySlippageBps ?? null;
     const exitSlippageBps = calcExitSlippageBps(recentExitContext.expectedExitPrice, exitPrice);
     const roundtripSlippageBps = calcRoundtripSlippageBps(entrySlippageBps, exitSlippageBps);
+    const entryUsd =
+      Number.isFinite(notionalUsd) && notionalUsd > 0
+        ? notionalUsd
+        : Number.isFinite(qty) && qty > 0 && Number.isFinite(entryPrice) && entryPrice > 0
+          ? qty * entryPrice
+          : 0;
+    const exitUsd =
+      Number.isFinite(qty) && qty > 0 && Number.isFinite(exitPrice) && exitPrice > 0
+        ? qty * exitPrice
+        : entryUsd;
 
     const event: PositionEvent = {
       type: eventType,
@@ -299,6 +310,9 @@ export class ManualRefreshReconciler {
           tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
           symbol,
           reason,
+          age: positionAge(dbPosition.entryTime, nowIso()),
+          entryUsd,
+          exitUsd,
           pnlUsd,
           pnlPct,
           ...(typeof exitSlippageBps === "number" ? { exitSlippageBps } : {}),

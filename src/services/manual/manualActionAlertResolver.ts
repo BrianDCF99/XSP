@@ -674,6 +674,18 @@ export class ManualAlertActionResolver {
     const expectedExitPrice = positiveFiniteNumber(payload.currentPrice);
     const exitSlippageBps = calcExitSlippageBps(expectedExitPrice, exitPrice);
     const roundtripSlippageBps = calcRoundtripSlippageBps(entrySlippageBps, exitSlippageBps);
+    const entryTimeIso = asString(payload.entryTime, openPosition?.entryTime ?? "");
+    const closedAge = entryTimeIso.length > 0 ? positionAge(entryTimeIso, nowIso()) : undefined;
+    const entryUsd =
+      Number.isFinite(notionalUsd) && notionalUsd > 0
+        ? notionalUsd
+        : Number.isFinite(qty) && qty > 0 && Number.isFinite(entryPrice) && entryPrice > 0
+          ? qty * entryPrice
+          : 0;
+    const exitUsd =
+      Number.isFinite(qty) && qty > 0 && Number.isFinite(exitPrice) && exitPrice > 0
+        ? qty * exitPrice
+        : entryUsd;
 
     const event: PositionEvent = {
       type,
@@ -719,6 +731,9 @@ export class ManualAlertActionResolver {
         tickerDeepLinkTemplate: this.deps.collector.tickerDeepLinkTemplate,
         symbol,
         reason,
+        ...(typeof closedAge === "string" ? { age: closedAge } : {}),
+        entryUsd,
+        exitUsd,
         pnlUsd,
         pnlPct,
         ...(typeof exitSlippageBps === "number" ? { exitSlippageBps } : {}),

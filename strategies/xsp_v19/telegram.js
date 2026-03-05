@@ -24,6 +24,11 @@ function fmtPrice(value) {
   return `$${value.toFixed(4)}`;
 }
 
+function fmtUsdOrNa(value) {
+  if (!Number.isFinite(value)) return "N/A";
+  return fmtUsd(value);
+}
+
 function fmtUsd(value) {
   if (!Number.isFinite(value)) return "$0.00";
   return `$${value.toFixed(2)}`;
@@ -202,6 +207,10 @@ export function buildExitConfirmedTelegramMessage(input) {
     `${icon}CLOSED: ${input.reason}`,
     "",
     `${ticker}`,
+    `Time: ${fmtAge(input.age)}`,
+    `Entry: ${fmtUsdOrNa(input.entryUsd)}`,
+    `Exit:  ${fmtUsdOrNa(input.exitUsd)}`,
+    "",
     `PNL: ${fmtSignedUsd(input.pnlUsd)} | ${fmtPct(input.pnlPct)}`,
     "",
     `Exit: ${fmtBps(input.exitSlippageBps)} | RT: ${fmtBps(input.roundtripSlippageBps)}`,

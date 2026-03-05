@@ -95,6 +95,10 @@ TICKER              DD - HH:MM (time since Entry)
 ✅(❌ - for loss)CLOSED: Reason (Each strat has own exit reasons)
 
 TICKER
+Time: DD - HH:MM (time since Entry)
+Entry: $Margin
+Exit:  $ExitMargin
+
 PNL: $ | % (Realized pnl including the entry and exit fees slippages and stuff)
 
 Exit(Slippage): x.xx bps | RT(Round trip slippage): x.xx bps
