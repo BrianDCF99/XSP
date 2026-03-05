@@ -10,6 +10,7 @@ function encodeAction(action: ManualAlertButtonAction): string {
   if (action === "CLOSED") return "c";
   if (action === "REFRESH") return "r";
   if (action === "TRACK") return "t";
+  if (action === "DECLINE") return "d";
   return "i";
 }
 
@@ -18,6 +19,7 @@ function decodeAction(raw: string): ManualAlertButtonAction | null {
   if (raw === "c") return "CLOSED";
   if (raw === "r") return "REFRESH";
   if (raw === "t") return "TRACK";
+  if (raw === "d") return "DECLINE";
   if (raw === "i") return "IGNORE";
   return null;
 }

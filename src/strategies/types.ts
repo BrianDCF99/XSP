@@ -7,7 +7,7 @@ import { ExchangeAccountState } from "../exchange/accountStateExtractor.js";
 export type StrategyMessageType = "ENTRY" | "EXIT" | "FUNDING" | "INFO" | "STATUS";
 
 export type ManualAlertKind = "ENTRY_AVAILABLE" | "EXIT_AVAILABLE" | "REPLACEMENT_AVAILABLE" | "ENTRY_TRACK_DECISION";
-export type ManualAlertButtonAction = "OPENED" | "CLOSED" | "REFRESH" | "TRACK" | "IGNORE";
+export type ManualAlertButtonAction = "OPENED" | "CLOSED" | "REFRESH" | "TRACK" | "IGNORE" | "DECLINE";
 
 export interface TelegramInlineButton {
   text: string;

@@ -300,6 +300,29 @@ export class ManualAlertRepository {
     };
   }
 
+  async isSymbolDeclinedRecently(strategyName: string, primarySymbol: string, minutesWindow = 15): Promise<boolean> {
+    if (!this.db) return false;
+
+    const fromIso = new Date(Date.now() - minutesWindow * 60_000).toISOString();
+    const { data, error } = await this.db
+      .from("manual_alerts")
+      .select("id")
+      .eq("strategy_name", strategyName)
+      .eq("primary_symbol", primarySymbol)
+      .eq("status", "CONFIRMED")
+      .eq("requested_action", "DECLINE")
+      .gte("confirmed_at", fromIso)
+      .order("confirmed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to query symbol decline mute window: ${error.message}`);
+    }
+
+    return data !== null;
+  }
+
   async countMissedEntries(strategyName: string): Promise<number> {
     if (!this.db) return 0;
 

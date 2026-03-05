@@ -254,12 +254,15 @@ function selectSignals(rows, openSymbols) {
 
 function createEntryAvailableMessage(input, signal, currentOpenTrades) {
   const marginToPut = resolveMarginToPut(input);
+  const adjustedTpPct = TAKE_PROFIT_UNLEVERED + (ENTRY_FEE_BPS + ENTRY_SLIPPAGE_BPS) / 10_000;
+  const takeProfitEstimatePrice = signal.mexcPrice * (1 - adjustedTpPct);
   const payload = {
     symbol: signal.mexcSymbol,
     bybitSymbol: signal.bybitSymbol,
     bybitPriceAtAlert: signal.bybitPrice,
     priceAtAlert: signal.mexcPrice,
     marginToPut,
+    takeProfitEstimatePrice,
     sellRatioNow: signal.sellRatio,
     hourVolumeNow: signal.hourVolume,
     sellRatioMax: SELL_RATIO_MAX,
@@ -287,6 +290,7 @@ function createEntryAvailableMessage(input, signal, currentOpenTrades) {
       bybitPriceAtAlert: signal.bybitPrice,
       mexcPriceAtAlert: signal.mexcPrice,
       marginToPut,
+      takeProfitEstimatePrice,
       sellRatioNow: signal.sellRatio,
       hourVolumeNow: signal.hourVolume,
       currentOpenTrades
@@ -295,7 +299,7 @@ function createEntryAvailableMessage(input, signal, currentOpenTrades) {
       kind: "ENTRY_AVAILABLE",
       primarySymbol: signal.mexcSymbol,
       payload,
-      buttons: ["OPENED", "REFRESH"]
+      buttons: ["OPENED", "DECLINE", "REFRESH"]
     }
   };
 }

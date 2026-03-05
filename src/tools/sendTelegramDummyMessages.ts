@@ -106,6 +106,7 @@ function buildDummyPreviews(
     bybitPriceAtAlert: 62_481.1234,
     mexcPriceAtAlert: 62_490.7777,
     marginToPut: 100,
+    takeProfitEstimatePrice: 59_865.7000,
     sellRatioNow: 0.1482,
     hourVolumeNow: 3_845_100,
     currentOpenTrades: 4,
@@ -117,6 +118,7 @@ function buildDummyPreviews(
     inlineKeyboard: [
       [
         { text: "Opened", callbackData: "dummy|opened" },
+        { text: "Decline", callbackData: "dummy|decline" },
         { text: "Refresh", callbackData: "dummy|refresh" }
       ]
     ]

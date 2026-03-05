@@ -90,6 +90,11 @@ export class ManualAlertActionResolver {
         return;
       }
 
+      if ((alert.kind === "ENTRY_AVAILABLE" || alert.kind === "REPLACEMENT_AVAILABLE") && action === "DECLINE") {
+        await this.deps.repos.manualAlerts.markConfirmed(alert.id, action);
+        return;
+      }
+
       await this.deps.repos.manualAlerts.markWaiting(alert.id, action, "Action not valid for this alert kind");
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
@@ -122,6 +127,11 @@ export class ManualAlertActionResolver {
       const mexcPriceAtAlert = asNumber(row?.mexcPrice, asNumber(payload.priceAtAlert, 0));
       const sellRatioNow = asNumber(row?.sellRatio, asNumber(payload.sellRatioNow, 0));
       const hourVolumeNow = asNumber(row?.hourVolume, asNumber(payload.hourVolumeNow, 0));
+      const takeProfitUnlevered = Math.max(0, asNumber(payload.takeProfitUnlevered, 0));
+      const entryFeeBps = asNumber(payload.entryFeeBps, 0);
+      const entrySlippageBps = asNumber(payload.entrySlippageBps, 0);
+      const adjustedTpPct = takeProfitUnlevered + (entryFeeBps + entrySlippageBps) / 10_000;
+      const takeProfitEstimatePrice = mexcPriceAtAlert > 0 ? mexcPriceAtAlert * (1 - adjustedTpPct) : 0;
       const refreshedMessage: StrategyMessage = {
         type: "ENTRY",
         symbol,
@@ -135,6 +145,7 @@ export class ManualAlertActionResolver {
           bybitPriceAtAlert,
           mexcPriceAtAlert,
           marginToPut,
+          takeProfitEstimatePrice,
           currentOpenTrades: openPositions.length,
           sellRatioNow,
           hourVolumeNow
@@ -148,10 +159,11 @@ export class ManualAlertActionResolver {
             bybitPriceAtAlert,
             priceAtAlert: mexcPriceAtAlert,
             marginToPut,
+            takeProfitEstimatePrice,
             sellRatioNow,
             hourVolumeNow
           },
-          buttons: ["OPENED", "REFRESH"]
+          buttons: ["OPENED", "DECLINE", "REFRESH"]
         }
       };
 
