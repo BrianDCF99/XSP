@@ -7,6 +7,8 @@ import { Logger } from "../utils/logger.js";
 import {
   buildAnswerCallbackBody,
   buildAnswerCallbackQueryUrl,
+  buildEditMessageTextBody,
+  buildEditMessageTextUrl,
   buildGetUpdatesBody,
   buildGetUpdatesUrl,
   buildSendMessageBody,
@@ -16,6 +18,7 @@ import { extractTelegramMessageId, isTelegramSendSuccess, isTelegramUpdatesSucce
 import { TelegramApiResponse, TelegramUpdate, TelegramUpdatesApiResponse } from "./telegramTypes.js";
 
 const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const MESSAGE_NOT_MODIFIED = "message is not modified";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -24,6 +27,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 export class TelegramClient {
+  private readonly opportunityMessageIds = new Map<string, number>();
+  private opportunityUpsertMode = false;
+
   constructor(
     private readonly cfg: RuntimeConfig,
     private readonly logger: Logger
@@ -34,6 +40,56 @@ export class TelegramClient {
   }
 
   async sendMessage(text: string, replyMarkup?: TelegramReplyMarkup): Promise<number | null> {
+    this.setOpportunityUpsertMode(false);
+    return this.sendMessageInternal(text, replyMarkup);
+  }
+
+  setOpportunityUpsertMode(enabled: boolean): void {
+    if (enabled) {
+      if (!this.opportunityUpsertMode) {
+        this.opportunityUpsertMode = true;
+        this.invalidateOpportunityChain();
+      }
+      return;
+    }
+
+    if (!this.opportunityUpsertMode && this.opportunityMessageIds.size === 0) return;
+    this.opportunityUpsertMode = false;
+    this.invalidateOpportunityChain();
+  }
+
+  async upsertOpportunityMessage(
+    symbol: string,
+    text: string,
+    replyMarkup?: TelegramReplyMarkup
+  ): Promise<number | null> {
+    if (!this.isEnabled()) return null;
+    if (!this.opportunityUpsertMode) {
+      return this.sendMessageInternal(text, replyMarkup);
+    }
+
+    const normalizedSymbol = this.normalizeSymbol(symbol);
+    if (normalizedSymbol.length === 0) {
+      return this.sendMessageInternal(text, replyMarkup);
+    }
+
+    const existingMessageId = this.opportunityMessageIds.get(normalizedSymbol);
+    if (typeof existingMessageId === "number") {
+      const editedMessageId = await this.editMessageText(existingMessageId, text, replyMarkup);
+      if (editedMessageId !== null) {
+        this.opportunityMessageIds.set(normalizedSymbol, editedMessageId);
+        return editedMessageId;
+      }
+    }
+
+    const sentMessageId = await this.sendMessageInternal(text, replyMarkup);
+    if (sentMessageId !== null) {
+      this.opportunityMessageIds.set(normalizedSymbol, sentMessageId);
+    }
+    return sentMessageId;
+  }
+
+  private async sendMessageInternal(text: string, replyMarkup?: TelegramReplyMarkup): Promise<number | null> {
     if (!this.isEnabled()) return null;
 
     const url = buildSendMessageUrl(this.cfg);
@@ -52,6 +108,38 @@ export class TelegramClient {
       return extractTelegramMessageId(data);
     } catch (error) {
       this.logRequestError("sendMessage", url, error);
+      return null;
+    }
+  }
+
+  private async editMessageText(
+    messageId: number,
+    text: string,
+    replyMarkup?: TelegramReplyMarkup
+  ): Promise<number | null> {
+    if (!this.isEnabled()) return null;
+
+    const url = buildEditMessageTextUrl(this.cfg);
+    const body = buildEditMessageTextBody(this.cfg, messageId, text, replyMarkup);
+
+    try {
+      const res = await this.postJsonWithRetry("editMessageText", url, body);
+      const data = await this.parseJson<TelegramApiResponse>(res, "editMessageText");
+      if (!data) return null;
+
+      if (!isTelegramSendSuccess(res.ok, data)) {
+        const description = String(data.description ?? "unknown");
+        if (res.status === 400 && description.toLowerCase().includes(MESSAGE_NOT_MODIFIED)) {
+          return messageId;
+        }
+
+        this.logFailure("editMessageText", res.status, description);
+        return null;
+      }
+
+      return extractTelegramMessageId(data) ?? messageId;
+    } catch (error) {
+      this.logRequestError("editMessageText", url, error);
       return null;
     }
   }
@@ -90,6 +178,14 @@ export class TelegramClient {
     } catch (error) {
       this.logRequestError("answerCallbackQuery", url, error);
     }
+  }
+
+  private invalidateOpportunityChain(): void {
+    this.opportunityMessageIds.clear();
+  }
+
+  private normalizeSymbol(symbol: string): string {
+    return symbol.trim().toUpperCase();
   }
 
   private async postJsonWithRetry(operation: string, url: string, body: Record<string, unknown>): Promise<Response> {

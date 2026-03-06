@@ -3,9 +3,11 @@
  */
 export interface TelegramApiResponse {
   ok: boolean;
-  result?: {
-    message_id: number;
-  };
+  result?:
+    | {
+        message_id: number;
+      }
+    | boolean;
   description?: string;
 }
 

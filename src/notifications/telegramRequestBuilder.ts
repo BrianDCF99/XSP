@@ -8,26 +8,47 @@ export function buildSendMessageUrl(cfg: RuntimeConfig): string {
   return `${cfg.telegram.apiBaseUrl}/bot${cfg.env.telegramBotToken}/sendMessage`;
 }
 
+function toTelegramReplyMarkup(replyMarkup?: TelegramReplyMarkup): Record<string, unknown> | undefined {
+  if (!replyMarkup) return undefined;
+
+  return {
+    inline_keyboard: replyMarkup.inlineKeyboard.map((row) =>
+      row.map((button) => ({
+        text: button.text,
+        callback_data: button.callbackData
+      }))
+    )
+  };
+}
+
 export function buildSendMessageBody(cfg: RuntimeConfig, text: string, replyMarkup?: TelegramReplyMarkup) {
-  const body: Record<string, unknown> = {
+  return {
     chat_id: cfg.env.telegramChatId,
     text,
     parse_mode: cfg.telegram.parseMode,
-    disable_web_page_preview: cfg.telegram.disableWebPagePreview
+    disable_web_page_preview: cfg.telegram.disableWebPagePreview,
+    reply_markup: toTelegramReplyMarkup(replyMarkup)
   };
+}
 
-  if (replyMarkup) {
-    body.reply_markup = {
-      inline_keyboard: replyMarkup.inlineKeyboard.map((row) =>
-        row.map((button) => ({
-          text: button.text,
-          callback_data: button.callbackData
-        }))
-      )
-    };
-  }
+export function buildEditMessageTextUrl(cfg: RuntimeConfig): string {
+  return `${cfg.telegram.apiBaseUrl}/bot${cfg.env.telegramBotToken}/editMessageText`;
+}
 
-  return body;
+export function buildEditMessageTextBody(
+  cfg: RuntimeConfig,
+  messageId: number,
+  text: string,
+  replyMarkup?: TelegramReplyMarkup
+) {
+  return {
+    chat_id: cfg.env.telegramChatId,
+    message_id: messageId,
+    text,
+    parse_mode: cfg.telegram.parseMode,
+    disable_web_page_preview: cfg.telegram.disableWebPagePreview,
+    reply_markup: toTelegramReplyMarkup(replyMarkup)
+  };
 }
 
 export function buildGetUpdatesUrl(cfg: RuntimeConfig): string {

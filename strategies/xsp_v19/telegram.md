@@ -123,6 +123,7 @@ TICKER
 
     Margin: $MarginToPut
     TP: $TPestimateOnMexcPrice
+    Liq'd: $liquidationPrice
 
     SR:           x.xx
     Vol:          x.xx M

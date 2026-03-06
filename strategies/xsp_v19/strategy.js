@@ -261,6 +261,7 @@ function createEntryAvailableMessage(input, signal, currentOpenTrades) {
   const marginToPut = resolveMarginToPut(input);
   const adjustedTpPct = TAKE_PROFIT_UNLEVERED + (ENTRY_FEE_BPS + ENTRY_SLIPPAGE_BPS) / 10_000;
   const takeProfitEstimatePrice = signal.mexcPrice * (1 - adjustedTpPct);
+  const liquidationPrice = shortLiquidationPrice(signal.mexcPrice, LEVERAGE);
   const payload = {
     symbol: signal.mexcSymbol,
     bybitSymbol: signal.bybitSymbol,
@@ -268,6 +269,7 @@ function createEntryAvailableMessage(input, signal, currentOpenTrades) {
     priceAtAlert: signal.mexcPrice,
     marginToPut,
     takeProfitEstimatePrice,
+    liquidationPrice,
     sellRatioNow: signal.sellRatio,
     hourVolumeNow: signal.hourVolume,
     sellRatioMax: SELL_RATIO_MAX,
@@ -296,6 +298,7 @@ function createEntryAvailableMessage(input, signal, currentOpenTrades) {
       mexcPriceAtAlert: signal.mexcPrice,
       marginToPut,
       takeProfitEstimatePrice,
+      liquidationPrice,
       sellRatioNow: signal.sellRatio,
       hourVolumeNow: signal.hourVolume,
       currentOpenTrades

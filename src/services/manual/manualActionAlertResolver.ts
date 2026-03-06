@@ -152,8 +152,11 @@ export class ManualAlertActionResolver {
       const takeProfitUnlevered = Math.max(0, asNumber(payload.takeProfitUnlevered, 0));
       const entryFeeBps = asNumber(payload.entryFeeBps, 0);
       const entrySlippageBps = asNumber(payload.entrySlippageBps, 0);
+      const leverage = Math.max(1, asNumber(payload.leverage, 5));
       const adjustedTpPct = takeProfitUnlevered + (entryFeeBps + entrySlippageBps) / 10_000;
       const takeProfitEstimatePrice = mexcPriceAtAlert > 0 ? mexcPriceAtAlert * (1 - adjustedTpPct) : 0;
+      const liquidationPrice =
+        mexcPriceAtAlert > 0 ? shortLiquidationPrice(mexcPriceAtAlert, leverage) : asNumber(payload.liquidationPrice, 0);
       const refreshedMessage: StrategyMessage = {
         type: "ENTRY",
         symbol,
@@ -168,6 +171,7 @@ export class ManualAlertActionResolver {
           mexcPriceAtAlert,
           marginToPut,
           takeProfitEstimatePrice,
+          liquidationPrice,
           currentOpenTrades: openPositions.length,
           sellRatioNow,
           hourVolumeNow
@@ -183,6 +187,7 @@ export class ManualAlertActionResolver {
             priceAtAlert: mexcPriceAtAlert,
             marginToPut,
             takeProfitEstimatePrice,
+            liquidationPrice,
             sellRatioNow,
             hourVolumeNow
           },

@@ -4,7 +4,8 @@
 import { TelegramApiResponse, TelegramUpdatesApiResponse } from "./telegramTypes.js";
 
 export function extractTelegramMessageId(data: TelegramApiResponse): number | null {
-  return data.result?.message_id ?? null;
+  if (!data.result || typeof data.result === "boolean") return null;
+  return data.result.message_id ?? null;
 }
 
 export function isTelegramSendSuccess(httpOk: boolean, data: TelegramApiResponse): boolean {

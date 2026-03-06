@@ -123,7 +123,7 @@ export function buildEntryAvailableTelegramMessage(input) {
     `    Mexc:  E: ${fmtPrice(input.mexcPriceAtAlert)}`,
     "",
     `    Margin: ${fmtRoundedUsd(Number(input.marginToPut ?? 0))}`,
-    `    TP: ${fmtPrice(input.takeProfitEstimatePrice)}`,
+    `    TP: ${fmtPrice(input.takeProfitEstimatePrice)} | L: ${fmtPrice(input.liquidationPrice)}`,
     "",
     ...conditionLines(input.sellRatioNow, Number(input.hourVolumeNow), input.currentOpenTrades)
   ].join("\n");
