@@ -36,6 +36,16 @@ export interface StrategyPositionStats {
   exits: number;
 }
 
+export interface SymbolPerformanceSummary {
+  trades: number;
+  wins: number;
+  losses: number;
+  liquidations: number;
+  winPct: number;
+  totalPnlUsd: number;
+  totalFundingUsd: number;
+}
+
 export class TradeRepository {
   constructor(private readonly db: LiveTraderSupabaseClient | null) {}
 
@@ -178,6 +188,78 @@ export class TradeRepository {
       netFundingUsd,
       entries: Number(entriesResult.count ?? 0),
       exits: Number(exitsResult.count ?? 0)
+    };
+  }
+
+  async getSymbolPerformanceSummary(strategyName: string, symbol: string): Promise<SymbolPerformanceSummary> {
+    if (!this.db) {
+      return {
+        trades: 0,
+        wins: 0,
+        losses: 0,
+        liquidations: 0,
+        winPct: 0,
+        totalPnlUsd: 0,
+        totalFundingUsd: 0
+      };
+    }
+
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    const { data, error } = await this.db
+      .from("positions")
+      .select("status,pnl_usd,funding_usd")
+      .eq("strategy_name", strategyName)
+      .eq("symbol", normalizedSymbol);
+
+    if (error) {
+      throw new Error(`Failed to query symbol performance summary: ${error.message}`);
+    }
+
+    const closedStatuses = new Set(["CLOSED", "REPLACED", "LIQUIDATED"]);
+    let trades = 0;
+    let wins = 0;
+    let losses = 0;
+    let liquidations = 0;
+    let totalPnlUsd = 0;
+    let totalFundingUsd = 0;
+
+    for (const row of data ?? []) {
+      const status = String(row.status ?? "").toUpperCase();
+      const pnlUsd = Number(row.pnl_usd ?? 0);
+      const fundingUsd = Number(row.funding_usd ?? 0);
+
+      if (Number.isFinite(fundingUsd)) {
+        totalFundingUsd += fundingUsd;
+      }
+
+      if (!closedStatuses.has(status)) continue;
+
+      trades += 1;
+      if (Number.isFinite(pnlUsd)) {
+        totalPnlUsd += pnlUsd;
+      }
+
+      if (pnlUsd > 0) {
+        wins += 1;
+      } else {
+        losses += 1;
+      }
+
+      if (status === "LIQUIDATED") {
+        liquidations += 1;
+      }
+    }
+
+    const winPct = trades > 0 ? (wins / trades) * 100 : 0;
+
+    return {
+      trades,
+      wins,
+      losses,
+      liquidations,
+      winPct,
+      totalPnlUsd,
+      totalFundingUsd
     };
   }
 

@@ -200,3 +200,25 @@ TICKER
 
 ## /refresh Command
 bot poll mexc for my recent trades
+
+
+
+## /sig Symbol 
+🐦‍🔥 StrategyName V#                                                
+🫆 TICKER
+
+    Bybit: $currPrice
+    Mexc:  $currPrice
+
+    SR:           x.xx
+    Vol:          x.xx M
+
+Symbol Summary:
+    Trades: #numOfTrades
+    Wins: #numOfWins
+    Loses #numOfLoses
+    Liq'd: #numOfLiqd
+    Win %: win%
+
+    Total PNL: $PNL
+    Total Funding: $Funding

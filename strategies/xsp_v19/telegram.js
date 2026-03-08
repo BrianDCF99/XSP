@@ -336,3 +336,29 @@ export function buildStrategyStatusTelegramMessage(input) {
 export function buildNoSignalTelegramMessage(input) {
   return `${titleLine(input)}\n📈 Open Positions\n\nNo new entry signals this cycle.`;
 }
+
+export function buildSigCommandMessage(input) {
+  const ticker = buildTickerLink(input.tickerDeepLinkTemplate, input.symbol);
+  const summary = input.summary ?? {};
+
+  return [
+    titleLine(input),
+    `🫆 ${ticker}`,
+    "",
+    `    Bybit: ${fmtPrice(input.bybitPrice)}`,
+    `    Mexc:  ${fmtPrice(input.mexcPrice)}`,
+    "",
+    `    SR:${NBSP.repeat(11)}${metricSR(input.sellRatio)}`,
+    `    Vol:${NBSP.repeat(10)}${fmtMillions(input.hourVolume)}`,
+    "",
+    "Symbol Summary:",
+    `    Trades: ${Number(summary.trades ?? 0)}`,
+    `    Wins: ${Number(summary.wins ?? 0)}`,
+    `    Loses: ${Number(summary.losses ?? 0)}`,
+    `    Liq'd: ${Number(summary.liquidations ?? 0)}`,
+    `    Win %: ${fmtPct(Number(summary.winPct ?? 0))}`,
+    "",
+    `    Total PNL: ${fmtSignedUsd(Number(summary.totalPnlUsd ?? 0))}`,
+    `    Total Funding: ${fmtSignedUsd(Number(summary.totalFundingUsd ?? 0))}`
+  ].join("\n");
+}

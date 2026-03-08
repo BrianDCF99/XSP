@@ -4,10 +4,12 @@
 import { pathToFileURL } from "node:url";
 import { RuntimeConfig } from "../../config/schema.js";
 import { extractPriceMap } from "../../core/boot/priceMapExtractor.js";
+import type { SymbolPerformanceSummary } from "../../db/repos/tradeRepository.js";
 import { Repositories } from "../../db/repos/index.js";
 import { ExchangeAccountState, extractExchangeAccountState } from "../../exchange/accountStateExtractor.js";
 import { ExchangeCollector } from "../../exchange/exchangeCollector.js";
-import { extractBybitPriceMapByMexcSymbol } from "../../exchange/signalMarketExtractor.js";
+import type { BybitSignalRow } from "../../exchange/signalMarketExtractor.js";
+import { extractBybitPriceMapByMexcSymbol, extractBybitSignalRows } from "../../exchange/signalMarketExtractor.js";
 import { TelegramClient } from "../../notifications/telegramClient.js";
 import { TelegramCallbackQuery, TelegramUpdate } from "../../notifications/telegramTypes.js";
 import { ManualActionProcessor } from "../manual/manualActionProcessor.js";
@@ -18,6 +20,7 @@ import { buildStatusPayload } from "./statusPayloadBuilder.js";
 type ParsedCommand =
   | { kind: "INFO"; strategyName: string }
   | { kind: "STATUS"; strategyName: string }
+  | { kind: "SIG"; strategyName: string; symbolQuery: string }
   | { kind: "REFRESH" };
 
 interface StrategyTelegramModule {
@@ -70,6 +73,17 @@ interface StrategyTelegramModule {
       reason: string;
     }>;
   }) => string;
+  buildSigCommandMessage?: (input: {
+    emoji: string;
+    strategyLabel: string;
+    tickerDeepLinkTemplate: string;
+    symbol: string;
+    bybitPrice: number;
+    mexcPrice: number;
+    sellRatio: number;
+    hourVolume: number;
+    summary: SymbolPerformanceSummary;
+  }) => string;
 }
 
 function normalizeCommandToken(token: string): string {
@@ -109,6 +123,38 @@ function resolveStrategyName(input: string, strategyNames: string[]): string | n
   return null;
 }
 
+function normalizeLookupToken(value: string): string {
+  const upper = value.trim().toUpperCase();
+  if (upper.length === 0) return upper;
+
+  if (upper.includes("_")) {
+    return upper.split("_")[0] ?? upper;
+  }
+
+  if (upper.endsWith("USDT")) {
+    const base = upper.slice(0, -4);
+    if (base.length > 0) return base;
+  }
+  if (upper.endsWith("USDC")) {
+    const base = upper.slice(0, -4);
+    if (base.length > 0) return base;
+  }
+
+  return upper;
+}
+
+function resolveSigStrategyName(maybeStrategy: string | undefined, strategyNames: string[]): string | null {
+  if (typeof maybeStrategy === "string" && maybeStrategy.length > 0) {
+    return resolveStrategyName(maybeStrategy, strategyNames);
+  }
+
+  if (strategyNames.length === 1) {
+    return strategyNames[0]!;
+  }
+
+  return null;
+}
+
 function parseCommand(text: string, strategyNames: string[]): ParsedCommand | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith("/")) return null;
@@ -133,6 +179,20 @@ function parseCommand(text: string, strategyNames: string[]): ParsedCommand | nu
     }
 
     return null;
+  }
+
+  if (token === "sig") {
+    const symbolQuery = (parts[1] ?? "").trim();
+    if (symbolQuery.length === 0) return null;
+
+    const strategyName = resolveSigStrategyName(parts[2], strategyNames);
+    if (!strategyName) return null;
+
+    return {
+      kind: "SIG",
+      strategyName,
+      symbolQuery
+    };
   }
 
   const strategyName = resolveStrategyName(token, strategyNames);
@@ -274,6 +334,11 @@ export class TelegramCommandService {
 
     if (parsed.kind === "INFO") {
       await this.handleInfoCommand(parsed.strategyName);
+      return;
+    }
+
+    if (parsed.kind === "SIG") {
+      await this.handleSigCommand(parsed.strategyName, parsed.symbolQuery);
       return;
     }
 
@@ -422,6 +487,83 @@ export class TelegramCommandService {
     });
 
     await this.telegram.sendMessage(text);
+  }
+
+  private async handleSigCommand(strategyName: string, symbolQuery: string): Promise<void> {
+    const module = this.moduleByStrategy.get(strategyName);
+
+    const snapshot = await this.collector.collectFuturesData();
+    const market = extractBybitSignalRows(snapshot);
+    const matched = this.resolveSigRow(symbolQuery, market.rows);
+
+    if (!matched) {
+      await this.telegram.sendMessage(`No symbol found for '${symbolQuery}'.`);
+      return;
+    }
+
+    const summary = await this.repos.trades.getSymbolPerformanceSummary(strategyName, matched.mexcSymbol);
+    const text =
+      module?.buildSigCommandMessage?.({
+        emoji: this.resolveEmoji(strategyName, module),
+        strategyLabel: this.resolveStrategyLabel(strategyName, module),
+        tickerDeepLinkTemplate: this.collector.tickerDeepLinkTemplate,
+        symbol: matched.mexcSymbol,
+        bybitPrice: matched.bybitPrice,
+        mexcPrice: matched.mexcPrice,
+        sellRatio: matched.sellRatio,
+        hourVolume: matched.hourVolume,
+        summary
+      }) ??
+      this.buildDefaultSigMessage(matched, summary);
+
+    await this.telegram.sendMessage(text);
+  }
+
+  private resolveSigRow(symbolQuery: string, rows: BybitSignalRow[]): BybitSignalRow | null {
+    const query = normalizeLookupToken(symbolQuery);
+    if (query.length === 0) return null;
+
+    const fullUpper = symbolQuery.trim().toUpperCase();
+    const exact = rows.find(
+      (row) => row.mexcSymbol.toUpperCase() === fullUpper || row.bybitSymbol.toUpperCase() === fullUpper
+    );
+    if (exact) return exact;
+
+    return (
+      rows.find((row) => {
+        const mexcBase = normalizeLookupToken(row.mexcSymbol);
+        const bybitBase = normalizeLookupToken(row.bybitSymbol);
+        return mexcBase === query || bybitBase === query;
+      }) ?? null
+    );
+  }
+
+  private buildDefaultSigMessage(row: BybitSignalRow, summary: SymbolPerformanceSummary): string {
+    const winPct = Number.isFinite(summary.winPct) ? summary.winPct.toFixed(2) : "0.00";
+    const volMillions = Number.isFinite(row.hourVolume) ? (row.hourVolume / 1_000_000).toFixed(2) : "N/A";
+    const fmtPrice = (value: number) => (Number.isFinite(value) ? `$${value.toFixed(4)}` : "N/A");
+    const fmtUsd = (value: number) => {
+      if (!Number.isFinite(value)) return "$0.00";
+      const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+      return `${sign}$${Math.abs(value).toFixed(2)}`;
+    };
+
+    return [
+      `${row.mexcSymbol}`,
+      `Bybit: ${fmtPrice(row.bybitPrice)}`,
+      `Mexc: ${fmtPrice(row.mexcPrice)}`,
+      `SR: ${Number.isFinite(row.sellRatio) ? row.sellRatio.toFixed(2) : "N/A"}`,
+      `Vol: ${volMillions} M`,
+      "",
+      "Symbol Summary:",
+      `Trades: ${summary.trades}`,
+      `Wins: ${summary.wins}`,
+      `Losses: ${summary.losses}`,
+      `Liq'd: ${summary.liquidations}`,
+      `Win %: ${winPct}%`,
+      `Total PNL: ${fmtUsd(summary.totalPnlUsd)}`,
+      `Total Funding: ${fmtUsd(summary.totalFundingUsd)}`
+    ].join("\n");
   }
 
   private resolveStrategyLabel(strategyName: string, module: StrategyTelegramModule): string {
