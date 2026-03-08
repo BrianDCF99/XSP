@@ -133,6 +133,7 @@ export class ManualActionProcessor {
     const waiting = await this.repos.manualAlerts.listWaiting(100);
     for (const alert of waiting) {
       if (!alert.requestedAction) continue;
+      if (alert.requestedAction === "CLOSED" && this.shouldAutoConfirmExitAlert(alert)) continue;
       await this.alertResolver.resolveAlertAction(alert, alert.requestedAction, false);
     }
   }
@@ -159,9 +160,15 @@ export class ManualActionProcessor {
   async pollAutoConfirmExitAlerts(): Promise<void> {
     if (!this.cfg.manualExecution.enabled) return;
 
-    const pending = await this.repos.manualAlerts.listPending(200);
-    for (const alert of pending) {
+    const [pending, waiting] = await Promise.all([
+      this.repos.manualAlerts.listPending(200),
+      this.repos.manualAlerts.listWaiting(200)
+    ]);
+    const candidates = [...pending, ...waiting];
+
+    for (const alert of candidates) {
       if (!this.shouldAutoConfirmExitAlert(alert)) continue;
+      if (alert.status === "WAITING" && alert.requestedAction && alert.requestedAction !== "CLOSED") continue;
       await this.alertResolver.resolveAlertAction(alert, "CLOSED", false);
     }
   }
