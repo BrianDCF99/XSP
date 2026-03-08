@@ -5,6 +5,13 @@
 export const STRATEGY_LABEL = "XSP V19";
 export const STRATEGY_LEVERAGE = 5;
 export const STRATEGY_EMOJI = "🐦‍🔥";
+export const CLOSE_SIGNAL_CONFIG = {
+  sellRatioMax: 0.2,
+  minHourVolume: 1_000_000,
+  sellRatioNearDelta: 0.1,
+  hourVolumeNearDelta: 300_000,
+  maxRows: 12
+};
 export const ENTRY_TRACK_DEFAULTS = {
   takeProfitUnlevered: 0.04,
   entryFeeBps: 6,
@@ -361,4 +368,30 @@ export function buildSigCommandMessage(input) {
     `    Total PNL: ${fmtSignedUsd(Number(summary.totalPnlUsd ?? 0))}`,
     `    Total Funding: ${fmtSignedUsd(Number(summary.totalFundingUsd ?? 0))}`
   ].join("\n");
+}
+
+export function buildCloseCommandMessage(input) {
+  const symbols = Array.isArray(input.symbols) ? input.symbols : [];
+  if (symbols.length === 0) {
+    return [titleLine(input), "👀 Close Symbols", "", "No close symbols right now."].join("\n");
+  }
+
+  const lines = [titleLine(input), "👀 Close Symbols", ""];
+
+  for (let i = 0; i < symbols.length; i += 1) {
+    const item = symbols[i];
+    const ticker = buildTickerLink(input.tickerDeepLinkTemplate, item.symbol);
+
+    lines.push(`${i + 1}. ${ticker}`);
+    lines.push(`    Bybit: ${fmtPrice(item.bybitPrice)}`);
+    lines.push(`    Mexc:  ${fmtPrice(item.mexcPrice)}`);
+    lines.push(`    SR:${NBSP.repeat(11)}${metricSR(item.sellRatio)}`);
+    lines.push(`    Vol:${NBSP.repeat(10)}${fmtMillions(item.hourVolume)}`);
+
+    if (i < symbols.length - 1) {
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n");
 }

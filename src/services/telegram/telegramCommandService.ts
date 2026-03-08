@@ -21,7 +21,32 @@ type ParsedCommand =
   | { kind: "INFO"; strategyName: string }
   | { kind: "STATUS"; strategyName: string }
   | { kind: "SIG"; strategyName: string; symbolQuery: string }
+  | { kind: "CLOSE"; strategyName: string }
   | { kind: "REFRESH" };
+
+interface CloseSignalConfig {
+  sellRatioMax: number;
+  minHourVolume: number;
+  sellRatioNearDelta: number;
+  hourVolumeNearDelta: number;
+  maxRows: number;
+}
+
+interface CloseSymbolRow {
+  symbol: string;
+  bybitPrice: number;
+  mexcPrice: number;
+  sellRatio: number;
+  hourVolume: number;
+}
+
+const DEFAULT_CLOSE_SIGNAL_CONFIG: CloseSignalConfig = {
+  sellRatioMax: 0.2,
+  minHourVolume: 1_000_000,
+  sellRatioNearDelta: 0.1,
+  hourVolumeNearDelta: 300_000,
+  maxRows: 12
+};
 
 interface StrategyTelegramModule {
   STRATEGY_LABEL?: string;
@@ -83,6 +108,13 @@ interface StrategyTelegramModule {
     sellRatio: number;
     hourVolume: number;
     summary: SymbolPerformanceSummary;
+  }) => string;
+  CLOSE_SIGNAL_CONFIG?: Partial<CloseSignalConfig>;
+  buildCloseCommandMessage?: (input: {
+    emoji: string;
+    strategyLabel: string;
+    tickerDeepLinkTemplate: string;
+    symbols: CloseSymbolRow[];
   }) => string;
 }
 
@@ -155,6 +187,20 @@ function resolveSigStrategyName(maybeStrategy: string | undefined, strategyNames
   return null;
 }
 
+function resolveCommandStrategyName(maybeStrategy: string | undefined, strategyNames: string[]): string | null {
+  if (typeof maybeStrategy === "string" && maybeStrategy.length > 0) {
+    const strategyName = resolveStrategyName(maybeStrategy, strategyNames);
+    if (!strategyName) return null;
+    return strategyName;
+  }
+
+  if (strategyNames.length === 1) {
+    return strategyNames[0]!;
+  }
+
+  return null;
+}
+
 function parseCommand(text: string, strategyNames: string[]): ParsedCommand | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith("/")) return null;
@@ -167,18 +213,9 @@ function parseCommand(text: string, strategyNames: string[]): ParsedCommand | nu
   }
 
   if (token === "info") {
-    const maybeStrategy = parts[1];
-    if (typeof maybeStrategy === "string" && maybeStrategy.length > 0) {
-      const strategyName = resolveStrategyName(maybeStrategy, strategyNames);
-      if (!strategyName) return null;
-      return { kind: "INFO", strategyName };
-    }
-
-    if (strategyNames.length === 1) {
-      return { kind: "INFO", strategyName: strategyNames[0]! };
-    }
-
-    return null;
+    const strategyName = resolveCommandStrategyName(parts[1], strategyNames);
+    if (!strategyName) return null;
+    return { kind: "INFO", strategyName };
   }
 
   if (token === "sig") {
@@ -193,6 +230,12 @@ function parseCommand(text: string, strategyNames: string[]): ParsedCommand | nu
       strategyName,
       symbolQuery
     };
+  }
+
+  if (token === "close") {
+    const strategyName = resolveCommandStrategyName(parts[1], strategyNames);
+    if (!strategyName) return null;
+    return { kind: "CLOSE", strategyName };
   }
 
   const strategyName = resolveStrategyName(token, strategyNames);
@@ -339,6 +382,11 @@ export class TelegramCommandService {
 
     if (parsed.kind === "SIG") {
       await this.handleSigCommand(parsed.strategyName, parsed.symbolQuery);
+      return;
+    }
+
+    if (parsed.kind === "CLOSE") {
+      await this.handleCloseCommand(parsed.strategyName);
       return;
     }
 
@@ -564,6 +612,99 @@ export class TelegramCommandService {
       `Total PNL: ${fmtUsd(summary.totalPnlUsd)}`,
       `Total Funding: ${fmtUsd(summary.totalFundingUsd)}`
     ].join("\n");
+  }
+
+  private async handleCloseCommand(strategyName: string): Promise<void> {
+    const module = this.moduleByStrategy.get(strategyName);
+    const config = this.resolveCloseSignalConfig(module?.CLOSE_SIGNAL_CONFIG);
+    const snapshot = await this.collector.collectFuturesData();
+    const market = extractBybitSignalRows(snapshot);
+    const symbols = this.selectCloseSymbols(market.rows, config);
+
+    if (symbols.length === 0) {
+      await this.telegram.sendMessage("No close symbols right now.");
+      return;
+    }
+
+    const text =
+      module?.buildCloseCommandMessage?.({
+        emoji: this.resolveEmoji(strategyName, module),
+        strategyLabel: this.resolveStrategyLabel(strategyName, module),
+        tickerDeepLinkTemplate: this.collector.tickerDeepLinkTemplate,
+        symbols
+      }) ?? this.buildDefaultCloseMessage(symbols);
+
+    await this.telegram.sendMessage(text);
+  }
+
+  private resolveCloseSignalConfig(partial: Partial<CloseSignalConfig> | undefined): CloseSignalConfig {
+    const source = partial ?? {};
+
+    const positiveOrDefault = (value: unknown, fallback: number) => {
+      const n = Number(value);
+      return Number.isFinite(n) && n > 0 ? n : fallback;
+    };
+
+    return {
+      sellRatioMax: positiveOrDefault(source.sellRatioMax, DEFAULT_CLOSE_SIGNAL_CONFIG.sellRatioMax),
+      minHourVolume: positiveOrDefault(source.minHourVolume, DEFAULT_CLOSE_SIGNAL_CONFIG.minHourVolume),
+      sellRatioNearDelta: positiveOrDefault(source.sellRatioNearDelta, DEFAULT_CLOSE_SIGNAL_CONFIG.sellRatioNearDelta),
+      hourVolumeNearDelta: positiveOrDefault(source.hourVolumeNearDelta, DEFAULT_CLOSE_SIGNAL_CONFIG.hourVolumeNearDelta),
+      maxRows: Math.floor(positiveOrDefault(source.maxRows, DEFAULT_CLOSE_SIGNAL_CONFIG.maxRows))
+    };
+  }
+
+  private selectCloseSymbols(rows: BybitSignalRow[], config: CloseSignalConfig): CloseSymbolRow[] {
+    const score = (row: BybitSignalRow): number => {
+      const srDistance = Math.max(0, row.sellRatio - config.sellRatioMax);
+      const volDistance = Math.max(0, config.minHourVolume - row.hourVolume);
+      const srScore = srDistance / config.sellRatioNearDelta;
+      const volScore = volDistance / config.hourVolumeNearDelta;
+      return Math.min(srScore, volScore);
+    };
+
+    return rows
+      .filter((row) => Number.isFinite(row.sellRatio) && Number.isFinite(row.hourVolume))
+      .filter((row) => {
+        const srDistance = Math.max(0, row.sellRatio - config.sellRatioMax);
+        const volDistance = Math.max(0, config.minHourVolume - row.hourVolume);
+        const nearOrGoodSellRatio = srDistance <= config.sellRatioNearDelta;
+        const nearOrGoodVolume = volDistance <= config.hourVolumeNearDelta;
+        return nearOrGoodSellRatio || nearOrGoodVolume;
+      })
+      .sort((a, b) => {
+        const scoreDelta = score(a) - score(b);
+        if (scoreDelta !== 0) return scoreDelta;
+        if (a.sellRatio !== b.sellRatio) return a.sellRatio - b.sellRatio;
+        return b.hourVolume - a.hourVolume;
+      })
+      .slice(0, config.maxRows)
+      .map((row) => ({
+        symbol: row.mexcSymbol,
+        bybitPrice: row.bybitPrice,
+        mexcPrice: row.mexcPrice,
+        sellRatio: row.sellRatio,
+        hourVolume: row.hourVolume
+      }));
+  }
+
+  private buildDefaultCloseMessage(symbols: CloseSymbolRow[]): string {
+    const fmtPrice = (value: number) => (Number.isFinite(value) ? `$${value.toFixed(4)}` : "N/A");
+    const fmtSr = (value: number) => (Number.isFinite(value) ? value.toFixed(2) : "N/A");
+    const fmtVol = (value: number) => (Number.isFinite(value) ? `${(value / 1_000_000).toFixed(2)} M` : "N/A");
+
+    const lines = ["👀 Close Symbols", ""];
+    for (let i = 0; i < symbols.length; i += 1) {
+      const item = symbols[i]!;
+      lines.push(`${i + 1}. ${item.symbol}`);
+      lines.push(`    Bybit: ${fmtPrice(item.bybitPrice)}`);
+      lines.push(`    Mexc:  ${fmtPrice(item.mexcPrice)}`);
+      lines.push(`    SR:           ${fmtSr(item.sellRatio)}`);
+      lines.push(`    Vol:          ${fmtVol(item.hourVolume)}`);
+      if (i < symbols.length - 1) lines.push("");
+    }
+
+    return lines.join("\n");
   }
 
   private resolveStrategyLabel(strategyName: string, module: StrategyTelegramModule): string {

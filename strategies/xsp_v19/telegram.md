@@ -203,7 +203,7 @@ bot poll mexc for my recent trades
 
 
 
-## /sig Symbol 
+## /sig Symbol command
 🐦‍🔥 StrategyName V#                                                
 🫆 TICKER
 
@@ -222,3 +222,28 @@ Symbol Summary:
 
     Total PNL: $PNL
     Total Funding: $Funding
+
+
+## /close command
+- Coins will appear in the text as long as one signal is with in .1 Sell raio or 300,000 volume from threshold 
+
+🐦‍🔥 StrategyName V#                                                
+👀 Close Symbols
+
+1. TICKER
+    Bybit: $currPrice
+    Mexc:  $currPrice
+    SR:           x.xx
+    Vol:          x.xx M
+
+2. TICKER
+    Bybit: $currPrice
+    Mexc:  $currPrice
+    SR:           x.xx
+    Vol:          x.xx M
+
+3. TICKER
+    Bybit: $currPrice
+    Mexc:  $currPrice
+    SR:           x.xx
+    Vol:          x.xx M
